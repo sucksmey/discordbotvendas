@@ -59,7 +59,6 @@ async def on_ready():
         # Sincroniza comandos GLOBALMENTE (pode levar até 1 hora para aparecer)
         await bot.tree.sync()
         print("Comandos de barra (slash commands) sincronizados GLOBALMENTE!")
-        # Confirma quais comandos a árvore do bot TEM internamente antes de sincronizar
         print(f"Comandos carregados na árvore do bot: {[command.name for command in bot.tree.walk_commands()]}")
     except Exception as e:
         print(f"Erro ao sincronizar comandos de barra: {e}")
@@ -81,12 +80,23 @@ async def ola(interaction: discord.Interaction):
 async def load_cogs():
     for filename in os.listdir('./cogs'):
         if filename.endswith('.py') and not filename.startswith('__'):
+            cog_name = filename[:-3]
             try:
-                await bot.load_extension(f'cogs.{filename[:-3]}')
-                print(f'Carregado cog: {filename[:-3]}')
+                # >>> AQUI: Imprime o conteúdo do arquivo do cog antes de carregar <<<
+                cog_path = os.path.join('./cogs', filename)
+                print(f"\n--- Conteúdo do arquivo {cog_path} antes de carregar ---")
+                try:
+                    with open(cog_path, 'r', encoding='utf-8') as f:
+                        print(f.read())
+                except Exception as file_e:
+                    print(f"Erro ao ler arquivo {cog_path}: {file_e}")
+                print(f"--- Fim do conteúdo de {cog_path} ---\n")
+                # >>> FIM DO PRINT DE DEBUG <<<
+
+                await bot.load_extension(f'cogs.{cog_name}')
+                print(f'Carregado cog: {cog_name}')
             except Exception as e:
-                print(f'Falha ao carregar cog {filename[:-3]}: {e}')
-    # Adicionado um print para confirmar todos os cogs carregados
+                print(f'Falha ao carregar cog {cog_name}: {e}')
     print(f"Cogs carregados: {[cog.qualified_name for cog in bot.cogs.values()]}")
 
 
