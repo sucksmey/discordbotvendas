@@ -65,7 +65,6 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
             gamepass_confirm_view.add_item(discord.ui.Button(label="Já criei e desativei preços regionais", style=discord.ButtonStyle.success, custom_id="gamepass_created_confirm"))
             gamepass_confirm_view.add_item(discord.ui.Button(label="Preciso de ajuda com a Gamepass", style=discord.ButtonStyle.danger, custom_id="gamepass_help"))
 
-            print(f"[DEBUG] Enviando modal response para {interaction.user.name}.")
             await interaction.response.send_message(embeds=[embed, gamepass_tutorial_embed], view=gamepass_confirm_view, ephemeral=False)
             print(f"[DEBUG] Modal response enviada com sucesso para {interaction.user.name}.")
 
@@ -131,7 +130,6 @@ class RobuxQuantitySelectView(discord.ui.View):
                 color=config.ROSE_COLOR
             )
             
-            print(f"[DEBUG] Enviando modal para nickname para {interaction.user.name}.")
             await interaction.response.send_modal(RobloxNicknameModal(self.bot, self.product_name, selected_quantity_str, total_price))
             print(f"[DEBUG] Modal de nickname enviado com sucesso para {interaction.user.name}.")
 
@@ -153,6 +151,12 @@ class RobuxMainView(discord.ui.View):
     def __init__(self, bot_instance):
         super().__init__(timeout=180)
         self.bot = bot_instance
+
+        # Botão "Comprar Robux"
+        self.add_item(discord.ui.Button(label="Comprar Robux", style=discord.ButtonStyle.green, custom_id="buy_robux_button"))
+        # Botão "Consultar Valores"
+        self.add_item(discord.ui.Button(label="Consultar Valores", style=discord.ButtonStyle.secondary, custom_id="consult_robux_values_button"))
+
 
     @discord.ui.button(label="Comprar Robux", style=discord.ButtonStyle.green, custom_id="buy_robux_button")
     async def buy_robux_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -184,15 +188,13 @@ class RobuxMainView(discord.ui.View):
                         async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
                             # Chama o fluxo para Robux novamente
-                            await self.bot.get_cog("Purchase")._handle_product_category_command(interaction_button, "robux", "Robux")
+                            await self.bot.get_cog("Purchase").robux_command.callback(self.bot.get_cog("Purchase"), interaction_button) # Chama o comando /robux
                     await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction), ephemeral=True)
                     return
                 else:
                     await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id)
 
             # Inicia o processo de criação de carrinho para Robux
-            # Como é um botão "Comprar Robux", o create_new_cart já será chamado.
-            # A view ProductSelectView não é mais usada para Robux aqui.
             await self.bot.get_cog("Purchase")._create_new_cart(
                 interaction,
                 product_name,
@@ -210,6 +212,28 @@ class RobuxMainView(discord.ui.View):
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
             else:
                 await interaction.response.send_message(embed=error_embed, ephemeral=True)
+
+    @discord.ui.button(label="Consultar Valores", style=discord.ButtonStyle.secondary, custom_id="consult_robux_values_button")
+    async def consult_robux_values_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print(f"[DEBUG] Botão 'Consultar Valores' clicado por {interaction.user.name}.")
+        robux_product = config.PRODUCTS.get("Robux")
+        if not robux_product:
+            embed = discord.Embed(title="Erro", description="Informações de Robux não encontradas.", color=config.ROSE_COLOR)
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        prices_str = "\n".join([f"**{qty}**: R${price:.2f}" for qty, price in robux_product['prices'].items()])
+        vip_prices_str = "\n".join([f"**VIP {qty}**: R${price:.2f}" for qty, price in robux_product['vip_prices'].items()]) if 'vip_prices' in robux_product else "Nenhum preço VIP disponível."
+
+        embed = discord.Embed(
+            title="Tabela de Preços de Robux",
+            description="Aqui estão os valores de Robux disponíveis:",
+            color=config.ROSE_COLOR
+        )
+        embed.add_field(name="Valores Padrão", value=prices_str, inline=False)
+        embed.add_field(name="Valores VIP (se aplicável)", value=vip_prices_str, inline=False)
+        embed.set_footer(text="Atenção: Os preços podem ter taxas incluídas ou o Roblox pode cobrar uma porcentagem na Gamepass.")
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 class ProductCategorySelectView(discord.ui.View):
@@ -472,14 +496,15 @@ class Purchase(commands.Cog):
     @discord.app_commands.command(name="robux", description="Compre Robux para Roblox.")
     async def robux_command(self, interaction: discord.Interaction):
         print(f"[DEBUG] Comando /robux recebido de {interaction.user.name}.")
-        # Para Robux, apenas o botão inicial, sem Select menu de ProductCategorySelectView
+        # Mensagem de /robux agora é pública e com botão "Consultar Valores"
         embed = discord.Embed(
-            title="💎 Comprar Robux",
-            description="Clique no botão abaixo para iniciar a compra de Robux.",
+            title="💎 Central de Robux",
+            description="Escolha uma opção para continuar.",
             color=config.ROSE_COLOR
         )
-        await interaction.response.send_message(embed=embed, view=RobuxMainView(self.bot), ephemeral=True)
-        print(f"[DEBUG] Mensagem de botão Comprar Robux enviada para {interaction.user.name}.")
+        # Removido ephemeral=True para que a mensagem seja pública
+        await interaction.response.send_message(embed=embed, view=RobuxMainView(self.bot), ephemeral=False)
+        print(f"[DEBUG] Mensagem de botão Comprar Robux enviada publicamente para {interaction.user.name}.")
 
 
     @discord.app_commands.command(name="jogos", description="Compre itens para outros jogos (Valorant, Free Fire, etc.).")
