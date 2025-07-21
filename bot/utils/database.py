@@ -1,7 +1,7 @@
 # utils/database.py
 
 import asyncpg
-# Removido 'import config' daqui, pois a URL será passada diretamente
+# Removido 'import config' daqui, pois a URL é passada diretamente
 
 class Database:
     def __init__(self, database_url): # Agora o construtor recebe a URL
@@ -53,7 +53,7 @@ class Database:
                     cart_quantity TEXT DEFAULT NULL,
                     cart_status TEXT DEFAULT NULL,
                     last_cart_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    roblox_nickname TEXT DEFAULT NULL -- Adicionado o campo roblox_nickname
+                    roblox_nickname TEXT DEFAULT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS orders (
