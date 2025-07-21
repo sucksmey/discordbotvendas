@@ -40,8 +40,8 @@ intents.presences = True
 # Inicializa o bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Instância do banco de dados
-db = Database()
+# Instância do banco de dados - AGORA PASSA A DATABASE_URL
+db = Database(DATABASE_URL)
 # Anexa a instância do DB ao objeto bot para fácil acesso em cogs
 bot.db = db
 
