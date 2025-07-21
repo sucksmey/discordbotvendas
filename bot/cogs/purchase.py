@@ -65,9 +65,9 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
             gamepass_confirm_view.add_item(discord.ui.Button(label="Já criei e desativei preços regionais", style=discord.ButtonStyle.success, custom_id="gamepass_created_confirm"))
             gamepass_confirm_view.add_item(discord.ui.Button(label="Preciso de ajuda com a Gamepass", style=discord.ButtonStyle.danger, custom_id="gamepass_help"))
 
-            print(f"[DEBUG] Antes de interaction.response.send_message (Modal Nickname).")
+            print(f"[DEBUG] Enviando modal response para {interaction.user.name}.")
             await interaction.response.send_message(embeds=[embed, gamepass_tutorial_embed], view=gamepass_confirm_view, ephemeral=False)
-            print(f"[DEBUG] Após interaction.response.send_message (Modal Nickname).")
+            print(f"[DEBUG] Modal response enviada com sucesso para {interaction.user.name}.")
 
         except Exception as e:
             print(f"[ERROR] Erro em RobloxNicknameModal.on_submit para {interaction.user.name}: {e}")
