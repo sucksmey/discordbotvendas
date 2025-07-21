@@ -78,25 +78,25 @@ async def ola(interaction: discord.Interaction):
 
 # Função para carregar os cogs
 async def load_cogs():
-    for filename in os.listdir('./cogs'):
-        if filename.endswith('.py') and not filename.startswith('__'):
-            cog_name = filename[:-3]
-            try:
-                # >>> AQUI: Imprime o conteúdo do arquivo do cog antes de carregar <<<
-                cog_path = os.path.join('./cogs', filename)
-                print(f"\n--- Conteúdo do arquivo {cog_path} antes de carregar ---")
-                try:
-                    with open(cog_path, 'r', encoding='utf-8') as f:
-                        print(f.read())
-                except Exception as file_e:
-                    print(f"Erro ao ler arquivo {cog_path}: {file_e}")
-                print(f"--- Fim do conteúdo de {cog_path} ---\n")
-                # >>> FIM DO PRINT DE DEBUG <<<
+    # Lista dos cogs a serem carregados
+    cogs_to_load = ["robux", "jogos", "giftcard", "common_listeners", "test_commands"] # Adicione "test_commands" se ainda o tiver
 
-                await bot.load_extension(f'cogs.{cog_name}')
-                print(f'Carregado cog: {cog_name}')
-            except Exception as e:
-                print(f'Falha ao carregar cog {cog_name}: {e}')
+    for cog_name in cogs_to_load:
+        try:
+            # Imprime o conteúdo do arquivo do cog antes de carregar para depuração
+            cog_path = os.path.join('./cogs', f"{cog_name}.py")
+            print(f"\n--- Conteúdo do arquivo {cog_path} antes de carregar ---")
+            try:
+                with open(cog_path, 'r', encoding='utf-8') as f:
+                    print(f.read())
+            except Exception as file_e:
+                print(f"Erro ao ler arquivo {cog_path}: {file_e}")
+            print(f"--- Fim do conteúdo de {cog_path} ---\n")
+
+            await bot.load_extension(f'cogs.{cog_name}')
+            print(f'Carregado cog: {cog_name}')
+        except Exception as e:
+            print(f'Falha ao carregar cog {cog_name}: {e}')
     print(f"Cogs carregados: {[cog.qualified_name for cog in bot.cogs.values()]}")
 
 
