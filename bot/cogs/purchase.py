@@ -3,15 +3,15 @@
 import discord
 from discord.ext import commands
 import config
-import uuid
-import asyncio
+import uuid # Para gerar IDs únicos de pedido
+import asyncio # Para simular um delay
 from datetime import datetime
 
 # --- Modals ---
 class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblox"):
     def __init__(self, bot_instance, product_name, selected_quantity, total_price):
         super().__init__()
-        self.bot = bot_instance
+        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
         self.product_name = product_name
         self.selected_quantity = selected_quantity
         self.total_price = total_price
@@ -25,12 +25,12 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        print(f"[DEBUG] Modal Nickname: on_submit por {interaction.user.name}")
+        print(f"[DEBUG] Modal Nickname: on_submit por {interaction.user.name}.")
         user_id = interaction.user.id
         nickname = self.roblox_nickname.value
 
         try:
-            await self.bot.db.execute(
+            await self.bot.db.execute( # Acessa o DB via bot.db
                 "UPDATE users SET roblox_nickname = $1, cart_status = $2 WHERE user_id = $3 AND cart_thread_id IS NOT NULL",
                 nickname, 'nickname_informed', user_id
             )
@@ -42,6 +42,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
                 color=config.ROSE_COLOR
             )
 
+            # Tutorial da Gamepass e botões de confirmação
             gamepass_tutorial_embed = discord.Embed(
                 title="🎮 Passo 1: Crie sua Gamepass no Roblox",
                 description=(
@@ -53,7 +54,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
                     "**5.** Dê um nome qualquer, uma descrição e faça upload de uma imagem.\n"
                     "**6.** Após criar, clique na Gamepass recém-criada.\n"
                     "**7.** No menu lateral esquerdo, clique em `Sales` (Vendas).\n"
-                    "**8.** Ative `Item for Sale` (Item à Venda) e **defina o preço exato de Robux:** `R$ {int(self.total_price * 0.7)}` Robux (o Roblox tira 30%).\n"
+                    "**8.** Ative `Item for Sale` (Item à Venda) e **defina o preço exato de Robux:** `R$ {int(self.total_price * 0.7)}` Robux (o Roblox tira 30%).\n" # PREÇO DE VENDA DA GAMEPASS (70% do total)
                     "**9.** **MUITO IMPORTANTE:** Certifique-se de que a opção de **Preços Regionais está DESATIVADA**.\n"
                     "**10.** Salve as alterações e **copie o link da sua Gamepass**."
                 ),
@@ -90,6 +91,7 @@ class RobuxQuantitySelectView(discord.ui.View):
         self.product_name = product_name
 
         options = []
+        # Ordena as quantidades de Robux numericamente para a exibição
         sorted_quantities = sorted(config.PRODUCTS[product_name]['prices'].items(), key=lambda x: int(x[0].split(' ')[0]))
         
         for qty_str, price in sorted_quantities:
@@ -162,6 +164,11 @@ class ProductSelectView(discord.ui.View):
                 )
             )
         
+        # >>> NOVO PRINT DE DEBUG AQUI <<<
+        print(f"[DEBUG] ProductSelectView: Número de opções geradas: {len(options)}.")
+        if not options: # Adicionado um aviso extra se as opções estiverem vazias
+            print("[ERROR] ProductSelectView: A lista de opções está vazia! Isso causará um erro 400.")
+
         self.add_item(
             discord.ui.Select(
                 placeholder="Selecione um produto...",
@@ -177,7 +184,6 @@ class ProductSelectView(discord.ui.View):
         print(f"[DEBUG] ProductSelectView: select_product_callback por {interaction.user.name}.")
         selected_product_name = select.values[0]
         product_details = config.PRODUCTS[selected_product_name]
-        user_id = interaction.user.id
 
         try:
             current_cart = await self.bot.db.fetch_one(
@@ -193,7 +199,7 @@ class ProductSelectView(discord.ui.View):
                 if existing_thread:
                     embed = discord.Embed(
                         title="🛒 Carrinho em Andamento!",
-                        description=f"Você já possui um carrinho em andamento! [Clique aqui para acessá-lo]({existing_thread.jump_url}).",
+                        description=f"Você já possui um carrinho em andamento! [Clique aqui para acessá-lo]({existing_thread.jump_url}).\n\nDeseja iniciar uma **nova compra**?",
                         color=config.ROSE_COLOR
                     )
                     print(f"[DEBUG] Carrinho existente detectado, redirecionando para {existing_thread.jump_url}.")
@@ -229,9 +235,6 @@ class ProductSelectView(discord.ui.View):
                     print(f"[DEBUG] DB limpo, prosseguindo para criar novo carrinho.")
 
             print(f"[DEBUG] Invocando _create_new_cart para {user_id}.")
-            # >>> AQUI ESTAVA O ERRO DE ATRIBUTO! A função deve ser chamada dentro da própria classe
-            #      e não de um objeto ProductSelectView novo, ou passar o nome e detalhes corretos.
-            #      A correção está abaixo, usando o selected_product_name e product_details corretos.
             await self._create_new_cart(interaction, selected_product_name, product_details)
             
         except Exception as e:
@@ -248,7 +251,6 @@ class ProductSelectView(discord.ui.View):
             print(f"[DEBUG] Mensagem de erro de seleção de produto enviada.")
 
 
-    # >>> ESTE MÉTODO DEVE ESTAR AQUI DENTRO, COM ESTA INDENTAÇÃO! <<<
     async def _create_new_cart(self, interaction: discord.Interaction, selected_product_name: str, product_details: dict):
         print(f"[DEBUG] _create_new_cart iniciado para {interaction.user.name}.")
         user = interaction.user
@@ -283,7 +285,6 @@ class ProductSelectView(discord.ui.View):
             admin_role = guild.get_role(config.ADMIN_ROLE_ID)
             if admin_role:
                 print(f"[DEBUG] Adicionando admins à thread (Role ID: {config.ADMIN_ROLE_ID}).")
-                # Adiciona todos os admins à thread
                 for member in admin_role.members:
                     await new_thread.add_user(member)
                 print(f"[DEBUG] Admins adicionados à thread.")
@@ -311,7 +312,6 @@ class ProductSelectView(discord.ui.View):
             await interaction.response.edit_message(embed=embed, view=None)
             print(f"[DEBUG] Mensagem de resposta inicial editada.")
 
-            # Mensagem inicial na thread do carrinho
             thread_embed = discord.Embed(
                 title=f"Bem-vindo(a) ao seu Carrinho para {selected_product_name}!",
                 description=f"Olá {user.mention}! Por favor, aguarde as instruções ou clique em 'Pegar Ticket' para chamar um atendente.",
@@ -324,7 +324,6 @@ class ProductSelectView(discord.ui.View):
             await new_thread.send(embed=thread_embed, view=ticket_button_view)
             print(f"[DEBUG] Mensagem inicial na thread enviada.")
             
-            # Notifica o canal de logs de "carrinho em andamento"
             logs_channel = guild.get_channel(config.CARRINHO_EM_ANDAMENTO_CHANNEL_ID)
             if logs_channel and logs_channel.id != new_thread.id:
                  log_embed = discord.Embed(
@@ -433,7 +432,7 @@ class Purchase(commands.Cog):
                 title="🛒 Selecione um Produto",
                 description="Use o menu abaixo para escolher o produto que deseja comprar.",
                 color=config.ROSE_COLOR
-            ), view=ProductSelectView(self.bot), ephemeral=True) # Passa a instância do bot
+            ), view=ProductSelectView(self.bot), ephemeral=True)
             print(f"[DEBUG] Mensagem de seleção de produto inicial enviada.")
 
         except Exception as e:
@@ -575,7 +574,7 @@ class Purchase(commands.Cog):
                     )
                     print(f"[DEBUG] Enviando notificação de ajuda de gamepass para admin e {interaction.user.name}.")
                     await interaction.response.send_message(embed=embed)
-                    await interaction.message.edit(view=None) # Remove os botões após a solicitação de ajuda
+                    await interaction.message.edit(view=None)
                     print(f"[DEBUG] Notificação de ajuda de gamepass enviada.")
                 else:
                     print(f"[WARNING] Cargo de Admin ({config.ADMIN_ROLE_ID}) não encontrado para notificar ajuda de gamepass.")
