@@ -3,15 +3,15 @@
 import discord
 from discord.ext import commands
 import config
-import uuid
-import asyncio
+import uuid # Para gerar IDs únicos de pedido
+import asyncio # Para simular um delay
 from datetime import datetime
 
 # --- Modals ---
 class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblox"):
     def __init__(self, bot_instance, product_name, selected_quantity, total_price):
         super().__init__()
-        self.bot = bot_instance
+        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
         self.product_name = product_name
         self.selected_quantity = selected_quantity
         self.total_price = total_price
@@ -30,7 +30,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
         nickname = self.roblox_nickname.value
 
         try:
-            await self.bot.db.execute(
+            await self.bot.db.execute( # Acessa o DB via bot.db
                 "UPDATE users SET roblox_nickname = $1, cart_status = $2 WHERE user_id = $3 AND cart_thread_id IS NOT NULL",
                 nickname, 'nickname_informed', user_id
             )
@@ -65,6 +65,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
             gamepass_confirm_view.add_item(discord.ui.Button(label="Já criei e desativei preços regionais", style=discord.ButtonStyle.success, custom_id="gamepass_created_confirm"))
             gamepass_confirm_view.add_item(discord.ui.Button(label="Preciso de ajuda com a Gamepass", style=discord.ButtonStyle.danger, custom_id="gamepass_help"))
 
+            print(f"[DEBUG] Enviando modal response para {interaction.user.name}.")
             await interaction.response.send_message(embeds=[embed, gamepass_tutorial_embed], view=gamepass_confirm_view, ephemeral=False)
             print(f"[DEBUG] Modal response enviada com sucesso para {interaction.user.name}.")
 
@@ -188,7 +189,7 @@ class RobuxMainView(discord.ui.View):
                         async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
                             # Chama o fluxo para Robux novamente
-                            await self.bot.get_cog("Purchase").robux_command.callback(self.bot.get_cog("Purchase"), interaction_button) # Chama o comando /robux
+                            await self.bot.get_cog("Purchase").robux_command.callback(self.bot.get_cog("Purchase"), interaction_button)
                     await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction), ephemeral=True)
                     return
                 else:
@@ -246,28 +247,29 @@ class ProductCategorySelectView(discord.ui.View):
         for product_name, details in config.PRODUCTS.items():
             if details.get('category') == category_filter:
                 option_label = product_name
-                option_description = f"Compre {product_name}"
-                option_emoji = details["emoji"]
+                # option_description = f"Compre {product_name}" # REMOVIDO!
+                # option_emoji = details["emoji"] # REMOVIDO!
 
                 # >>> NOVOS PRINTS DE DEBUG AQUI <<<
                 print(f"[DEBUG] Gerando opção para categoria '{category_filter}':")
                 print(f"    Label: '{option_label}' (len: {len(option_label)})")
-                print(f"    Description: '{option_description}' (len: {len(option_description)})")
-                print(f"    Emoji: '{option_emoji}'")
+                # print(f"    Description: '{option_description}' (len: {len(option_description)})") # REMOVIDO DO PRINT TAMBÉM
+                # print(f"    Emoji: '{option_emoji}'") # REMOVIDO DO PRINT TAMBÉM
                 
                 # Verificações de comprimento de label e description antes de adicionar
                 if len(option_label) > 100:
                     print(f"[WARNING] Label '{option_label}' excede 100 caracteres. Será truncado.")
                     option_label = option_label[:97] + "..." # Trunca e adiciona reticências
-                if len(option_description) > 100:
-                    print(f"[WARNING] Description '{option_description}' excede 100 caracteres. Será truncado.")
-                    option_description = option_description[:97] + "..." # Trunca e adiciona reticências
+                # if len(option_description) > 100: # REMOVIDO VERIFICAÇÃO DE DESCRIPTION
+                #     print(f"[WARNING] Description '{option_description}' excede 100 caracteres. Será truncado.")
+                #     option_description = option_description[:97] + "..." # Trunca e adiciona reticências
 
                 options.append(
                     discord.SelectOption(
                         label=option_label,
-                        description=option_description,
-                        emoji=option_emoji
+                        # description=option_description, # REMOVIDO!
+                        # emoji=option_emoji # REMOVIDO!
+                        value=product_name # O valor é o nome do produto
                     )
                 )
         
@@ -622,7 +624,7 @@ class Purchase(commands.Cog):
                 if admin_role:
                     embed = discord.Embed(
                         title="🎫 Ticket Solicitado!",
-                        description=f"{admin_role.mention}, o usuário {interaction.user.mention} solicitou ajuda para a compra de **{product_name}**.\n\n"
+                        description=f"{admin_role.mention}, o usuário {interaction.user.name} solicitou ajuda para a compra de **{product_name}**.\n\n"
                                     "Um atendente estará com você em breve.",
                         color=config.ROSE_COLOR
                     )
