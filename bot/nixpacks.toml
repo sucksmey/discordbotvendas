@@ -1,0 +1,4 @@
+# nixpacks.toml
+
+[packages]
+apt = ["postgresql-client-dev"]
