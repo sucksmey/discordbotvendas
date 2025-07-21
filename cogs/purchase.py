@@ -8,9 +8,9 @@ import asyncio # Para simular um delay
 
 # --- Modals ---
 class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblox"):
-    def __init__(self, db, product_name, selected_quantity, total_price):
+    def __init__(self, bot_instance, product_name, selected_quantity, total_price):
         super().__init__()
-        self.db = db
+        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
         self.product_name = product_name
         self.selected_quantity = selected_quantity
         self.total_price = total_price
@@ -28,7 +28,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
         nickname = self.roblox_nickname.value
 
         # Atualiza o nickname no carrinho do usuário no DB
-        await self.db.execute(
+        await self.bot.db.execute( # Acessa o DB via bot.db
             "UPDATE users SET roblox_nickname = $1, cart_status = $2 WHERE user_id = $3 AND cart_thread_id IS NOT NULL",
             nickname, 'nickname_informed', user_id
         )
@@ -69,9 +69,9 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
 
 # --- Views ---
 class RobuxQuantitySelectView(discord.ui.View):
-    def __init__(self, db, product_name):
+    def __init__(self, bot_instance, product_name):
         super().__init__(timeout=180)
-        self.db = db
+        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
         self.product_name = product_name
 
         options = []
@@ -103,7 +103,7 @@ class RobuxQuantitySelectView(discord.ui.View):
         user_id = interaction.user.id
 
         # Atualiza o carrinho no DB com a quantidade e preço
-        await self.db.execute(
+        await self.bot.db.execute( # Acessa o DB via bot.db
             "UPDATE users SET cart_product_name = $1, cart_quantity = $2, cart_status = $3 WHERE user_id = $4 AND cart_thread_id IS NOT NULL",
             self.product_name, selected_quantity_str, 'quantity_selected', user_id
         )
@@ -115,13 +115,13 @@ class RobuxQuantitySelectView(discord.ui.View):
         )
         
         # Envia a mensagem e exibe o modal para o nickname
-        await interaction.response.send_modal(RobloxNicknameModal(self.db, self.product_name, selected_quantity_str, total_price))
+        await interaction.response.send_modal(RobloxNicknameModal(self.bot, self.product_name, selected_quantity_str, total_price))
 
 
 class ProductSelectView(discord.ui.View):
-    def __init__(self, db):
+    def __init__(self, bot_instance): # Recebe a instância do bot
         super().__init__(timeout=180)
-        self.db = db
+        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
 
         options = []
         for product_name, details in config.PRODUCTS.items():
@@ -149,7 +149,7 @@ class ProductSelectView(discord.ui.View):
         product_details = config.PRODUCTS[selected_product_name]
         user_id = interaction.user.id
 
-        current_cart = await self.db.fetch_one(
+        current_cart = await self.bot.db.fetch_one( # Acessa o DB via bot.db
             "SELECT cart_thread_id, cart_product_name FROM users WHERE user_id = $1 AND cart_thread_id IS NOT NULL",
             user_id
         )
@@ -166,7 +166,7 @@ class ProductSelectView(discord.ui.View):
                 )
                 await interaction.response.edit_message(embed=embed, view=None) 
             else:
-                await self.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id)
+                await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id) # Acessa o DB via bot.db
                 await self._create_new_cart(interaction, selected_product_name, product_details)
         else:
             await self._create_new_cart(interaction, selected_product_name, product_details)
@@ -203,10 +203,10 @@ class ProductSelectView(discord.ui.View):
                     await new_thread.add_user(member)
 
             # Salva o carrinho no banco de dados
-            await self.db.execute(
+            await self.bot.db.execute( # Acessa o DB via bot.db
                 """
-                INSERT INTO users (user_id, cart_thread_id, cart_product_name, cart_status, roblox_nickname)
-                VALUES ($1, $2, $3, $4, NULL) -- Resetar nickname para novo carrinho
+                INSERT INTO users (user_id, cart_thread_id, cart_product_name, cart_status)
+                VALUES ($1, $2, $3, $4)
                 ON CONFLICT (user_id) DO UPDATE
                 SET cart_thread_id = $2, cart_product_name = $3, cart_status = $4, roblox_nickname = NULL, last_cart_update = CURRENT_TIMESTAMP
                 """,
@@ -249,7 +249,7 @@ class ProductSelectView(discord.ui.View):
                         description="Escolha a quantidade de Robux que deseja comprar.",
                         color=config.ROSE_COLOR
                     ),
-                    view=RobuxQuantitySelectView(self.db, selected_product_name) # Passa o DB para a próxima view
+                    view=RobuxQuantitySelectView(self.bot, selected_product_name) # Passa a instância do bot
                 )
 
             elif product_details['type'] == 'manual':
@@ -263,13 +263,14 @@ class ProductSelectView(discord.ui.View):
                 description=f"Ocorreu um erro ao criar seu carrinho. Por favor, tente novamente ou contate um administrador. Erro: `{e}`",
                 color=config.ROSE_COLOR
             )
-            await interaction.followup.send(embed=error_embed, ephemeral=True) # Use followup se a interação já foi respondida
+            await interaction.followup.send(embed=error_embed, ephemeral=True)
+
 
 # Classe principal do Cog
 class Purchase(commands.Cog):
-    def __init__(self, bot: commands.Bot, db):
+    def __init__(self, bot: commands.Bot): # Não recebe 'db' diretamente aqui
         self.bot = bot
-        self.db = db
+        self.db = bot.db # Acessa o DB que foi anexado ao objeto bot
 
     # Comando de barra para iniciar o processo de compra
     @discord.app_commands.command(name="comprar", description="Inicia o processo de compra de produtos.")
@@ -291,27 +292,24 @@ class Purchase(commands.Cog):
                 )
                 
                 class NewPurchaseOptionView(discord.ui.View):
-                    def __init__(self, db_instance, original_interaction):
+                    def __init__(self, bot_instance, original_interaction): # Recebe a instância do bot
                         super().__init__(timeout=60)
-                        self.db = db_instance
+                        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
                         self.user_id = original_interaction.user.id
-                        self.original_interaction = original_interaction # Guarda a interação original
+                        self.original_interaction = original_interaction 
 
                     @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase")
                     async def start_new_purchase_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                        # Limpa o carrinho anterior e inicia um novo fluxo
-                        await self.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
+                        await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
                         
                         embed = discord.Embed(
                             title="🛒 Selecione um Produto para a Nova Compra",
                             description="Use o menu abaixo para escolher o produto que deseja comprar.",
                             color=config.ROSE_COLOR
                         )
-                        # Edita a mensagem da interação do botão (não a original do slash command)
-                        await interaction.response.edit_message(embed=embed, view=ProductSelectView(self.db))
+                        await interaction.response.edit_message(embed=embed, view=ProductSelectView(self.bot)) # Passa a instância do bot
                 
-                # A resposta inicial é com a view do botão "Iniciar Nova Compra"
-                await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.db, interaction), ephemeral=True)
+                await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction), ephemeral=True) # Passa a instância do bot
                 return 
             else:
                 await self.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", interaction.user.id)
@@ -321,18 +319,17 @@ class Purchase(commands.Cog):
             description="Use o menu abaixo para escolher o produto que deseja comprar.",
             color=config.ROSE_COLOR
         )
-        await interaction.response.send_message(embed=embed, view=ProductSelectView(self.db), ephemeral=True)
+        await interaction.response.send_message(embed=embed, view=ProductSelectView(self.bot), ephemeral=True) # Passa a instância do bot
 
     # Listener para o botão "Pegar Ticket"
     @commands.Cog.listener("on_interaction")
     async def on_interaction_ticket_button(self, interaction: discord.Interaction):
         if interaction.type == discord.InteractionType.component and interaction.data.get("custom_id") == "get_cart_ticket":
             if interaction.channel.type != discord.ChannelType.private_thread:
-                # Ignora se não for em uma thread de carrinho
                 return
 
             user_id = interaction.user.id
-            cart_info = await self.db.fetch_one(
+            cart_info = await self.bot.db.fetch_one( # Acessa o DB via bot.db
                 "SELECT cart_product_name FROM users WHERE user_id = $1 AND cart_thread_id = $2",
                 user_id, interaction.channel.id
             )
@@ -364,7 +361,7 @@ class Purchase(commands.Cog):
                 return
 
             user_id = interaction.user.id
-            cart_info = await self.db.fetch_one(
+            cart_info = await self.bot.db.fetch_one( # Acessa o DB via bot.db
                 "SELECT cart_product_name, cart_quantity FROM users WHERE user_id = $1 AND cart_thread_id = $2",
                 user_id, interaction.channel.id
             )
@@ -374,7 +371,7 @@ class Purchase(commands.Cog):
                 return
 
             # Altera o status para 'gamepass_confirmed' e pede o link
-            await self.db.execute(
+            await self.bot.db.execute( # Acessa o DB via bot.db
                 "UPDATE users SET cart_status = $1 WHERE user_id = $2 AND cart_thread_id = $3",
                 'gamepass_confirmed', user_id, interaction.channel.id
             )
@@ -384,7 +381,6 @@ class Purchase(commands.Cog):
                 description="Ótimo! Agora, por favor, **envie o link da sua Gamepass** neste chat. Verificaremos o valor para prosseguir com o pagamento.",
                 color=config.ROSE_COLOR
             )
-            # Remove a view dos botões da gamepass
             await interaction.response.edit_message(embed=embed, view=None)
 
         elif interaction.type == discord.InteractionType.component and interaction.data.get("custom_id") == "gamepass_help":
@@ -392,7 +388,7 @@ class Purchase(commands.Cog):
                 return
 
             user_id = interaction.user.id
-            cart_info = await self.db.fetch_one(
+            cart_info = await self.bot.db.fetch_one( # Acessa o DB via bot.db
                 "SELECT cart_product_name FROM users WHERE user_id = $1 AND cart_thread_id = $2",
                 user_id, interaction.channel.id
             )
@@ -409,7 +405,6 @@ class Purchase(commands.Cog):
                     color=config.ROSE_COLOR
                 )
                 await interaction.response.send_message(embed=embed)
-                # Opcional: Remover os botões para evitar mais cliques desnecessários
                 await interaction.message.edit(view=None)
             else:
                 await interaction.response.send_message("Não foi possível encontrar o cargo de administrador para notificar.", ephemeral=True)
@@ -417,4 +412,4 @@ class Purchase(commands.Cog):
 
 # Função setup para adicionar o cog ao bot
 async def setup(bot: commands.Bot):
-    await bot.add_cog(Purchase(bot, bot.db))
+    await bot.add_cog(Purchase(bot)) # Não passa 'db' aqui
