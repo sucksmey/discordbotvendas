@@ -1,3 +1,5 @@
+# cogs/purchase.py
+
 import discord
 from discord.ext import commands
 import config
