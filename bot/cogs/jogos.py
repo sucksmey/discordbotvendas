@@ -148,8 +148,6 @@ class ProductSelectView(discord.ui.View):
                     'category': product_details['category']
                 }
 
-            # _create_new_cart precisa ser acessível do RobuxCog
-            # Então, vamos acessá-lo pelo bot.get_cog("RobuxCog")
             await self.bot.get_cog("RobuxCog")._create_new_cart(interaction, actual_product_name_for_cart, actual_product_details_for_cart)
             
         except Exception as e:
@@ -166,79 +164,128 @@ class ProductSelectView(discord.ui.View):
             print(f"[DEBUG] Mensagem de erro de seleção de produto enviada.")
 
 
-    # _create_new_cart não deve estar aqui, pois está em robux.py agora.
-    # Removido async def _create_new_cart (interaction: discord.Interaction, selected_product_name: str, product_details: dict):
-    # e todo o seu conteúdo.
-
-# Nova View para seleção de subcategoria de jogos
-class GameSubcategorySelectView(discord.ui.View):
-    def __init__(self, bot_instance):
-        super().__init__(timeout=180)
-        self.bot = bot_instance
+    async def _create_new_cart(self, interaction: discord.Interaction, selected_product_name: str, product_details: dict):
+        print(f"[DEBUG] _create_new_cart iniciado para {interaction.user.name}. Produto: {selected_product_name}")
+        user = interaction.user
+        guild = interaction.guild
         
-        game_subcategories = set()
-        for product_name, details in config.PRODUCTS.items():
-            if details.get('category') == 'jogos' and 'sub_category' in details:
-                game_subcategories.add(details['sub_category'])
-        
-        options = []
-        for sub_cat in sorted(list(game_subcategories)):
-            options.append(discord.SelectOption(label=sub_cat, value=sub_cat))
-        
-        print(f"[DEBUG] GameSubcategorySelectView: Número total de subcategorias geradas: {len(options)}.")
-
-        if options:
-            self.add_item(
-                discord.ui.Select(
-                    placeholder="Selecione um tipo de jogo...",
-                    min_values=1,
-                    max_values=1,
-                    options=options[:25],
-                    custom_id="game_subcategory_select"
-                )
+        parent_channel = guild.get_channel(config.CARRINHO_EM_ANDAMENTO_CHANNEL_ID)
+        if not parent_channel:
+            print(f"[ERROR] Canal pai de carrinhos não encontrado: {config.CARRINHO_EM_ANDAMENTO_CHANNEL_ID}.")
+            embed = discord.Embed(
+                title="Erro",
+                description="Não foi possível encontrar o canal de carrinhos. Por favor, contate um administrador.",
+                color=config.ROSE_COLOR
             )
-        else:
-            print(f"[ERROR] GameSubcategorySelectView: Nenhuma subcategoria de jogos encontrada.")
-            self.add_item(discord.ui.Button(label="Nenhum tipo de jogo encontrado.", style=discord.ButtonStyle.red, disabled=True))
+            print(f"[DEBUG] Antes de interaction.response.send_message (_create_new_cart Erro - Canal não encontrado).")
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            print(f"[DEBUG] Após interaction.response.send_message (_create_new_cart Erro - Canal não encontrado).")
 
-    @discord.ui.select(custom_id="game_subcategory_select")
-    async def select_subcategory_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        print(f"[DEBUG] GameSubcategorySelectView: select_subcategory_callback por {interaction.user.name}.")
-        selected_subcategory = select.values[0]
+        timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
+        thread_name = f"carrinho-{user.name}-{timestamp_str}"
         
-        products_in_subcategory_flat = {}
-        for product_name, details in config.PRODUCTS.items():
-            if details.get('category') == 'jogos' and details.get('sub_category') == selected_subcategory:
-                for item_name, item_price in details['prices'].items():
-                    products_in_subcategory_flat[item_name] = item_price
-        
-        embed = discord.Embed(
-            title=f"🛒 Selecione um Jogo ({selected_subcategory})",
-            description="Use o menu abaixo para escolher o jogo que deseja comprar.",
-            color=config.ROSE_COLOR
-        )
-        print(f"[DEBUG] Antes de interaction.response.edit_message (Game Subcategory Select).")
-        await interaction.response.edit_message(
-            embed=embed, 
-            view=ProductSelectView(self.bot, products_in_subcategory_flat, "Jogo", parent_category_filter="jogos")
-        )
-        print(f"[DEBUG] Após interaction.response.edit_message (Game Subcategory Select).")
+        try:
+            print(f"[DEBUG] Tentando criar thread '{thread_name}' no canal {parent_channel.name}.")
+            new_thread = await parent_channel.create_thread(
+                name=thread_name,
+                type=discord.ChannelType.private_thread,
+                auto_archive_duration=1440,
+                invitable=True
+            )
+            print(f"[DEBUG] Thread '{new_thread.name}' criada (ID: {new_thread.id}).")
+            
+            await new_thread.add_user(user)
+            print(f"[DEBUG] Usuário {user.name} adicionado à thread.")
+            
+            admin_role = guild.get_role(config.ADMIN_ROLE_ID)
+            if admin_role:
+                print(f"[DEBUG] Adicionando admins à thread (Role ID: {config.ADMIN_ROLE_ID}).")
+                for member in admin_role.members:
+                    await new_thread.add_user(member)
+                print(f"[DEBUG] Admins adicionados à thread.")
+            else:
+                print(f"[WARNING] Cargo de Admin ({config.ADMIN_ROLE_ID}) não encontrado para adicionar à thread.")
+
+            print(f"[DEBUG] Salvando carrinho no DB para {user.name}.")
+            await self.bot.db.execute(
+                """
+                INSERT INTO users (user_id, cart_thread_id, cart_product_name, cart_status)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (user_id) DO UPDATE
+                SET cart_thread_id = $2, cart_product_name = $3, cart_status = $4, roblox_nickname = NULL, last_cart_update = CURRENT_TIMESTAMP
+                """,
+                user.id, new_thread.id, selected_product_name, 'in_progress'
+            )
+            print(f"[DEBUG] Carrinho salvo no DB para {user.name}.")
+
+            embed = discord.Embed(
+                title=f"🛒 Carrinho Iniciado para {selected_product_name}!",
+                description=f"Seu carrinho foi criado em {new_thread.mention}.\nPor favor, continue a conversa lá.",
+                color=config.ROSE_COLOR
+            )
+            print(f"[DEBUG] Antes de interaction.response.edit_message (_create_new_cart).")
+            await interaction.response.edit_message(embed=embed, view=None)
+            print(f"[DEBUG] Após interaction.response.edit_message (_create_new_cart).")
+
+            thread_embed = discord.Embed(
+                title=f"Bem-vindo(a) ao seu Carrinho para {selected_product_name}!",
+                description=f"Olá {user.mention}! Por favor, aguarde as instruções ou clique em 'Pegar Ticket' para chamar um atendente.",
+                color=config.ROSE_COLOR
+            )
+            ticket_button_view = discord.ui.View()
+            ticket_button_view.add_item(discord.ui.Button(label="Pegar Ticket", style=discord.ButtonStyle.primary, custom_id="get_cart_ticket"))
+            
+            print(f"[DEBUG] Antes de new_thread.send (_create_new_cart).")
+            await new_thread.send(embed=thread_embed, view=ticket_button_view)
+            print(f"[DEBUG] Após new_thread.send (_create_new_cart).")
+            
+            logs_channel = guild.get_channel(config.CARRINHO_EM_ANDAMENTO_CHANNEL_ID)
+            if logs_channel and logs_channel.id != new_thread.id:
+                 log_embed = discord.Embed(
+                    title="Carrinho em Andamento!",
+                    description=f"**Usuário:** {user.mention}\n**Produto:** {selected_product_name}\n**Carrinho:** {new_thread.mention}\n**Status:** Iniciado",
+                    color=config.ROSE_COLOR
+                 )
+                 print(f"[DEBUG] Antes de logs_channel.send (_create_new_cart).")
+                 await logs_channel.send(embed=log_embed)
+                 print(f"[DEBUG] Após logs_channel.send (_create_new_cart).")
+
+            if product_details.get('type') == 'automatized' and product_details.get('category') == 'robux':
+                print(f"[DEBUG] Produto automatizado (Robux), enviando seleção de quantidade para {user.name}.")
+                print(f"[DEBUG] Antes de new_thread.send (Robux Quantity Select).")
+                await new_thread.send(
+                    embed=discord.Embed(
+                        title="Selecione a Quantidade de Robux",
+                        description="Escolha a quantidade de Robux que deseja comprar.",
+                        color=config.ROSE_COLOR
+                    ),
+                    view=RobuxQuantitySelectView(self.bot, "Robux")
+                )
+                print(f"[DEBUG] Após new_thread.send (Robux Quantity Select).")
+
+            elif product_details.get('type') == 'manual':
+                print(f"[DEBUG] Produto manual, notificando admin para {user.name}.")
+                admin_role = guild.get_role(config.ADMIN_ROLE_ID)
+                print(f"[DEBUG] Antes de new_thread.send (Manual Notify).")
+                await new_thread.send(f"{admin_role.mention}, um atendimento manual é necessário para esta compra. Aguarde um momento por favor.")
+                print(f"[DEBUG] Após new_thread.send (Manual Notify).")
+            else:
+                print(f"[WARNING] Tipo de produto não definido para automação ou manual. Notificando admin.")
+                admin_role = guild.get_role(config.ADMIN_ROLE_ID)
+                print(f"[DEBUG] Antes de new_thread.send (Fallback Notify).")
+                await new_thread.send(f"{admin_role.mention}, a compra de {selected_product_name} requer atendimento. Aguarde um momento por favor.")
+                print(f"[DEBUG] Após new_thread.send (Fallback Notify).")
 
 
-# Classe principal do Cog para Jogos
-class JogosCog(commands.Cog):
-    def __init__(self, bot: discord.Client):
-        self.bot = bot
-        self.db = bot.db
-
-    @discord.app_commands.command(name="jogos", description="Compre itens para outros jogos (Valorant, Free Fire, etc.).")
-    async def games_command(self, interaction: discord.Interaction):
-        print(f"[DEBUG] Comando /jogos recebido de {interaction.user.name}.")
-        embed = discord.Embed(
-            title="🎮 Selecione o Tipo de Jogo",
-            description="Use o menu abaixo para escolher o tipo de jogo que você busca.",
-            color=config.ROSE_COLOR
-        )
-        print(f"[DEBUG] Antes de interaction.response.send_message (Games Command).")
-        await interaction.response.send_message(embed=embed, view=GameSubcategorySelectView(self.bot), ephemeral=True)
-        print(f"[DEBUG] Após interaction.response.send_message (Games Command).")
+        except Exception as e:
+            print(f"[CRITICAL ERROR] Erro CRÍTICO em _create_new_cart para {interaction.user.name}: {e}")
+            error_embed = discord.Embed(
+                title="Erro ao Iniciar Carrinho",
+                description=f"Ocorreu um erro ao criar seu carrinho. Por favor, tente novamente ou contate o administrador. Erro: `{e}`",
+                color=config.ROSE_COLOR
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            print(f"[DEBUG] Mensagem de erro de carrinho enviada.")
