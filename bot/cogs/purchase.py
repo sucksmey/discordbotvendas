@@ -3,15 +3,15 @@
 import discord
 from discord.ext import commands
 import config
-import uuid
-import asyncio
+import uuid # Para gerar IDs únicos de pedido
+import asyncio # Para simular um delay
 from datetime import datetime
 
 # --- Modals ---
 class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblox"):
     def __init__(self, bot_instance, product_name, selected_quantity, total_price):
         super().__init__()
-        self.bot = bot_instance
+        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
         self.product_name = product_name
         self.selected_quantity = selected_quantity
         self.total_price = total_price
@@ -30,7 +30,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
         nickname = self.roblox_nickname.value
 
         try:
-            await self.bot.db.execute(
+            await self.bot.db.execute( # Acessa o DB via bot.db
                 "UPDATE users SET roblox_nickname = $1, cart_status = $2 WHERE user_id = $3 AND cart_thread_id IS NOT NULL",
                 nickname, 'nickname_informed', user_id
             )
@@ -313,7 +313,6 @@ class ProductSelectView(discord.ui.View):
                 description="Produto selecionado inválido. Por favor, tente novamente. Se o erro persistir, contate o suporte.",
                 color=config.ROSE_COLOR
             )
-            # Adicionado prints para debug de resposta aqui
             print(f"[DEBUG] Antes de interaction.response.send_message (ProductSelectView Erro - Produto não encontrado).")
             return await interaction.response.send_message(embed=embed, ephemeral=True)
             print(f"[DEBUG] Após interaction.response.send_message (ProductSelectView Erro - Produto não encontrado).")
@@ -416,7 +415,6 @@ class ProductSelectView(discord.ui.View):
                 description="Não foi possível encontrar o canal de carrinhos. Por favor, contate um administrador.",
                 color=config.ROSE_COLOR
             )
-            # Adicionado prints para debug de resposta aqui
             print(f"[DEBUG] Antes de interaction.response.send_message (_create_new_cart Erro - Canal não encontrado).")
             return await interaction.response.send_message(embed=embed, ephemeral=True)
             print(f"[DEBUG] Após interaction.response.send_message (_create_new_cart Erro - Canal não encontrado).")
