@@ -20,10 +20,9 @@ MERCADOPAGO_ACCESS_TOKEN = os.getenv("MERCADOPAGO_ACCESS_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # --- VALIDAÇÕES DE VARIÁVEIS DE AMBIENTE ---
-# É crucial que essas variáveis estejam definidas.
 if not BOT_TOKEN:
     print("ERRO: Variável de ambiente BOT_TOKEN não encontrada. Certifique-se de que está no .env ou nas variáveis do Railway.")
-    exit(1) # Sai do programa se o token não for encontrado
+    exit(1)
 if not DATABASE_URL:
     print("ERRO: Variável de ambiente DATABASE_URL não encontrada. Certifique-se de que está no .env ou nas variáveis do Railway.")
     exit(1)
@@ -58,8 +57,10 @@ async def on_ready():
     # Sincroniza os comandos de barra (slash commands) com o Discord
     try:
         # Sincroniza comandos GLOBALMENTE (pode levar até 1 hora para aparecer)
-        await bot.tree.sync() # <<< MUDANÇA AQUI
+        await bot.tree.sync()
         print("Comandos de barra (slash commands) sincronizados GLOBALMENTE!")
+        # Confirma quais comandos a árvore do bot TEM internamente antes de sincronizar
+        print(f"Comandos carregados na árvore do bot: {[command.name for command in bot.tree.walk_commands()]}")
     except Exception as e:
         print(f"Erro ao sincronizar comandos de barra: {e}")
 
@@ -81,17 +82,18 @@ async def load_cogs():
     for filename in os.listdir('./cogs'):
         if filename.endswith('.py') and not filename.startswith('__'):
             try:
-                # Não passa 'db' aqui, pois ele já está em bot.db
                 await bot.load_extension(f'cogs.{filename[:-3]}')
                 print(f'Carregado cog: {filename[:-3]}')
             except Exception as e:
                 print(f'Falha ao carregar cog {filename[:-3]}: {e}')
+    # Adicionado um print para confirmar todos os cogs carregados
+    print(f"Cogs carregados: {[cog.qualified_name for cog in bot.cogs.values()]}")
+
 
 # Inicia o bot e carrega os cogs
 async def main():
     async with bot:
         await load_cogs()
-        # Usa a variável BOT_TOKEN lida do ambiente
         await bot.start(BOT_TOKEN)
 
 # Garante que a função main() seja executada
