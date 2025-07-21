@@ -3,15 +3,15 @@
 import discord
 from discord.ext import commands
 import config
-import uuid # Para gerar IDs únicos de pedido
-import asyncio # Para simular um delay
+import uuid
+import asyncio
 from datetime import datetime
 
 # --- Modals ---
 class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblox"):
     def __init__(self, bot_instance, product_name, selected_quantity, total_price):
         super().__init__()
-        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
+        self.bot = bot_instance
         self.product_name = product_name
         self.selected_quantity = selected_quantity
         self.total_price = total_price
@@ -30,7 +30,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
         nickname = self.roblox_nickname.value
 
         try:
-            await self.bot.db.execute( # Acessa o DB via bot.db
+            await self.bot.db.execute(
                 "UPDATE users SET roblox_nickname = $1, cart_status = $2 WHERE user_id = $3 AND cart_thread_id IS NOT NULL",
                 nickname, 'nickname_informed', user_id
             )
@@ -42,7 +42,6 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
                 color=config.ROSE_COLOR
             )
 
-            # Tutorial da Gamepass e botões de confirmação
             gamepass_tutorial_embed = discord.Embed(
                 title="🎮 Passo 1: Crie sua Gamepass no Roblox",
                 description=(
@@ -149,6 +148,70 @@ class RobuxQuantitySelectView(discord.ui.View):
                 await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
 
+# Nova View para o botão Comprar Robux
+class RobuxMainView(discord.ui.View):
+    def __init__(self, bot_instance):
+        super().__init__(timeout=180)
+        self.bot = bot_instance
+
+    @discord.ui.button(label="Comprar Robux", style=discord.ButtonStyle.green, custom_id="buy_robux_button")
+    async def buy_robux_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print(f"[DEBUG] Botão 'Comprar Robux' clicado por {interaction.user.name}.")
+        product_name = "Robux" # Assume que é sempre "Robux"
+        user_id = interaction.user.id
+
+        try:
+            current_cart = await self.bot.db.fetch_one(
+                "SELECT cart_thread_id FROM users WHERE user_id = $1 AND cart_thread_id IS NOT NULL",
+                user_id
+            )
+            if current_cart:
+                existing_thread_id = current_cart['cart_thread_id']
+                existing_thread = interaction.guild.get_thread(existing_thread_id)
+                if existing_thread:
+                    embed = discord.Embed(
+                        title="🛒 Carrinho em Andamento!",
+                        description=f"Você já possui um carrinho em andamento! [Clique aqui para acessá-lo]({existing_thread.jump_url}).\n\nDeseja iniciar uma **nova compra**?",
+                        color=config.ROSE_COLOR
+                    )
+                    class NewPurchaseOptionView(discord.ui.View):
+                        def __init__(self, bot_instance, original_interaction):
+                            super().__init__(timeout=60)
+                            self.bot = bot_instance
+                            self.user_id = original_interaction.user.id
+                            self.original_interaction = original_interaction
+                        @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase_from_robux_existing_cart")
+                        async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
+                            await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
+                            # Chama o fluxo para Robux novamente
+                            await self.bot.get_cog("Purchase")._handle_product_category_command(interaction_button, "robux", "Robux")
+                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction), ephemeral=True)
+                    return
+                else:
+                    await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id)
+
+            # Inicia o processo de criação de carrinho para Robux
+            # Como é um botão "Comprar Robux", o create_new_cart já será chamado.
+            # A view ProductSelectView não é mais usada para Robux aqui.
+            await self.bot.get_cog("Purchase")._create_new_cart(
+                interaction,
+                product_name,
+                config.PRODUCTS[product_name] # Passa os detalhes completos do produto Robux
+            )
+            
+        except Exception as e:
+            print(f"[CRITICAL ERROR] Erro CRÍTICO em RobuxMainView.buy_robux_button_callback para {interaction.user.name}: {e}")
+            error_embed = discord.Embed(
+                title="Erro na Compra de Robux",
+                description=f"Ocorreu um erro ao iniciar a compra de Robux. Por favor, tente novamente. Erro: `{e}`",
+                color=config.ROSE_COLOR
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=error_embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+
+
 class ProductCategorySelectView(discord.ui.View):
     def __init__(self, bot_instance, category_filter: str):
         super().__init__(timeout=180)
@@ -168,9 +231,13 @@ class ProductCategorySelectView(discord.ui.View):
                 print(f"    Description: '{option_description}' (len: {len(option_description)})")
                 print(f"    Emoji: '{option_emoji}'")
                 
-                # Opcional: Adicionar uma verificação de segurança no código para limitar chars
-                # if len(option_label) > 100: option_label = option_label[:97] + "..."
-                # if len(option_description) > 100: option_description = option_description[:97] + "..."
+                # Verificações de comprimento de label e description antes de adicionar
+                if len(option_label) > 100:
+                    print(f"[WARNING] Label '{option_label}' excede 100 caracteres. Será truncado.")
+                    option_label = option_label[:97] + "..." # Trunca e adiciona reticências
+                if len(option_description) > 100:
+                    print(f"[WARNING] Description '{option_description}' excede 100 caracteres. Será truncado.")
+                    option_description = option_description[:97] + "..." # Trunca e adiciona reticências
 
                 options.append(
                     discord.SelectOption(
@@ -254,7 +321,7 @@ class ProductCategorySelectView(discord.ui.View):
                             print(f"[DEBUG] Mensagem editada com nova seleção de produto.")
                     
                     print(f"[DEBUG] Enviando mensagem de carrinho existente com opção de nova compra para {interaction.user.name}.")
-                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, self.category_filter, self.category_filter.capitalize()), ephemeral=True) # Passa a categoria original
+                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, self.category_filter, self.category_filter.capitalize()), ephemeral=True)
                     print(f"[DEBUG] Mensagem de carrinho existente enviada.")
                     return 
                 else:
@@ -405,7 +472,15 @@ class Purchase(commands.Cog):
     @discord.app_commands.command(name="robux", description="Compre Robux para Roblox.")
     async def robux_command(self, interaction: discord.Interaction):
         print(f"[DEBUG] Comando /robux recebido de {interaction.user.name}.")
-        await self._handle_product_category_command(interaction, "robux", "Robux")
+        # Para Robux, apenas o botão inicial, sem Select menu de ProductCategorySelectView
+        embed = discord.Embed(
+            title="💎 Comprar Robux",
+            description="Clique no botão abaixo para iniciar a compra de Robux.",
+            color=config.ROSE_COLOR
+        )
+        await interaction.response.send_message(embed=embed, view=RobuxMainView(self.bot), ephemeral=True)
+        print(f"[DEBUG] Mensagem de botão Comprar Robux enviada para {interaction.user.name}.")
+
 
     @discord.app_commands.command(name="jogos", description="Compre itens para outros jogos (Valorant, Free Fire, etc.).")
     async def games_command(self, interaction: discord.Interaction):
@@ -464,7 +539,7 @@ class Purchase(commands.Cog):
                             print(f"[DEBUG] Mensagem editada com nova seleção de produto.")
                     
                     print(f"[DEBUG] Enviando mensagem de carrinho existente com opção de nova compra para {interaction.user.name}.")
-                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, category_filter, category_name), ephemeral=True) # Passa a categoria original
+                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, category_filter, category_name), ephemeral=True)
                     print(f"[DEBUG] Mensagem de carrinho existente enviada.")
                     return 
                 else:
@@ -615,7 +690,7 @@ class Purchase(commands.Cog):
                 if admin_role:
                     embed = discord.Embed(
                         title="🆘 Ajuda com Gamepass Solicitada!",
-                        description=f"{admin_role.mention}, o usuário {interaction.user.mention} precisa de ajuda para configurar a Gamepass. Por favor, auxilie-o.",
+                        description=f"{admin_role.mention}, o usuário {interaction.user.name} precisa de ajuda para configurar a Gamepass. Por favor, auxilie-o.",
                         color=config.ROSE_COLOR
                     )
                     print(f"[DEBUG] Enviando notificação de ajuda de gamepass para admin e {interaction.user.name}.")
