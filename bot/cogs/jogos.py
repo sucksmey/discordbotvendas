@@ -581,7 +581,7 @@ class CommonListenersCog(commands.Cog):
                 if interaction.response.is_done():
                     await interaction.followup.send(embed=error_embed, ephemeral=True)
                 else:
-                    await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                 print(f"[DEBUG] Mensagem de erro de gamepass enviada.")
 
     elif interaction.type == discord.InteractionType.component and interaction.data.get("custom_id") == "gamepass_help":
@@ -633,10 +633,13 @@ class CommonListenersCog(commands.Cog):
             if interaction.response.is_done():
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             print(f"[DEBUG] Mensagem de erro de gamepass enviada.")
 
 
 # Função setup para adicionar o cog ao bot
 async def setup(bot: commands.Bot):
+    await bot.add_cog(CommonListenersCog(bot)) # Mudei para CommonListenersCog
     await bot.add_cog(RobuxCog(bot))
+    await bot.add_cog(JogosCog(bot))
+    await bot.add_cog(GiftcardCog(bot))
