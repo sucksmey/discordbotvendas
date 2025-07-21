@@ -1,0 +1,8 @@
+# requirements.txt
+# Lista de dependências Python para o bot
+
+discord-py
+python-dotenv
+aiohttp
+asyncpg
+Flask
