@@ -1,17 +1,18 @@
 # utils/database.py
 
 import asyncpg
-import config
+# Removido 'import config' daqui, pois a URL será passada diretamente
 
 class Database:
-    def __init__(self):
+    def __init__(self, database_url): # Agora o construtor recebe a URL
+        self.database_url = database_url # Armazena a URL
         self.pool = None
 
     async def connect(self):
         """Estabelece a conexão com o banco de dados."""
         if not self.pool:
             try:
-                self.pool = await asyncpg.create_pool(dsn=config.DATABASE_URL)
+                self.pool = await asyncpg.create_pool(dsn=self.database_url) # Usa self.database_url
                 print("Conexão com o banco de dados PostgreSQL estabelecida.")
             except Exception as e:
                 print(f"Erro ao conectar ao banco de dados: {e}")
@@ -51,7 +52,8 @@ class Database:
                     cart_product_name TEXT DEFAULT NULL,
                     cart_quantity TEXT DEFAULT NULL,
                     cart_status TEXT DEFAULT NULL,
-                    last_cart_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    last_cart_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    roblox_nickname TEXT DEFAULT NULL -- Adicionado o campo roblox_nickname
                 );
 
                 CREATE TABLE IF NOT EXISTS orders (
@@ -74,6 +76,5 @@ class Database:
                     review_comment TEXT DEFAULT NULL
                 );
 
-                -- Adicione mais tabelas conforme necessário (ex: para FAQ, estoque se não for fixo)
             """)
             print("Tabelas do banco de dados verificadas/criadas.")
