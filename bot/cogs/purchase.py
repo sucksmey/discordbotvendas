@@ -3,15 +3,15 @@
 import discord
 from discord.ext import commands
 import config
-import uuid
-import asyncio
+import uuid # Para gerar IDs únicos de pedido
+import asyncio # Para simular um delay
 from datetime import datetime
 
 # --- Modals ---
 class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblox"):
     def __init__(self, bot_instance, product_name, selected_quantity, total_price):
         super().__init__()
-        self.bot = bot_instance
+        self.bot = bot_instance # Armazena a instância do bot para acessar bot.db
         self.product_name = product_name
         self.selected_quantity = selected_quantity
         self.total_price = total_price
@@ -30,7 +30,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
         nickname = self.roblox_nickname.value
 
         try:
-            await self.bot.db.execute(
+            await self.bot.db.execute( # Acessa o DB via bot.db
                 "UPDATE users SET roblox_nickname = $1, cart_status = $2 WHERE user_id = $3 AND cart_thread_id IS NOT NULL",
                 nickname, 'nickname_informed', user_id
             )
@@ -42,6 +42,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
                 color=config.ROSE_COLOR
             )
 
+            # Tutorial da Gamepass e botões de confirmação
             gamepass_tutorial_embed = discord.Embed(
                 title="🎮 Passo 1: Crie sua Gamepass no Roblox",
                 description=(
@@ -157,16 +158,30 @@ class ProductCategorySelectView(discord.ui.View):
         options = []
         for product_name, details in config.PRODUCTS.items():
             if details.get('category') == category_filter:
+                option_label = product_name
+                option_description = f"Compre {product_name}"
+                option_emoji = details["emoji"]
+
+                # >>> NOVOS PRINTS DE DEBUG AQUI <<<
+                print(f"[DEBUG] Gerando opção para categoria '{category_filter}':")
+                print(f"    Label: '{option_label}' (len: {len(option_label)})")
+                print(f"    Description: '{option_description}' (len: {len(option_description)})")
+                print(f"    Emoji: '{option_emoji}'")
+                
+                # Opcional: Adicionar uma verificação de segurança no código para limitar chars
+                # if len(option_label) > 100: option_label = option_label[:97] + "..."
+                # if len(option_description) > 100: option_description = option_description[:97] + "..."
+
                 options.append(
                     discord.SelectOption(
-                        label=product_name,
-                        description=f"Compre {product_name}",
-                        emoji=details["emoji"]
+                        label=option_label,
+                        description=option_description,
+                        emoji=option_emoji
                     )
                 )
         
-        print(f"[DEBUG] ProductCategorySelectView: Número de opções geradas para '{category_filter}': {len(options)}.")
-        if not options:
+        print(f"[DEBUG] ProductCategorySelectView: Número total de opções geradas para '{category_filter}': {len(options)}.")
+        if not options: # Aviso extra se as opções estiverem vazias
             print(f"[ERROR] ProductCategorySelectView: A lista de opções para '{category_filter}' está vazia! Isso causará um erro 400.")
 
         self.add_item(
@@ -183,6 +198,16 @@ class ProductCategorySelectView(discord.ui.View):
     async def select_product_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
         print(f"[DEBUG] ProductCategorySelectView: select_product_callback por {interaction.user.name}.")
         selected_product_name = select.values[0]
+        # É importante verificar se o produto existe no config.PRODUCTS antes de tentar acessá-lo
+        if selected_product_name not in config.PRODUCTS:
+            print(f"[ERROR] Produto '{selected_product_name}' não encontrado no config.PRODUCTS!")
+            embed = discord.Embed(
+                title="Erro",
+                description="Produto selecionado inválido. Por favor, tente novamente.",
+                color=config.ROSE_COLOR
+            )
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+            
         product_details = config.PRODUCTS[selected_product_name]
         user_id = interaction.user.id
 
@@ -199,18 +224,20 @@ class ProductCategorySelectView(discord.ui.View):
                 
                 if existing_thread:
                     embed = discord.Embed(
-                        title="🛒 Carrinho em Andamento!",
+                        title="🛒 Você já tem um carrinho!",
                         description=f"Você já possui um carrinho em andamento! [Clique aqui para acessá-lo]({existing_thread.jump_url}).\n\nDeseja iniciar uma **nova compra**?",
                         color=config.ROSE_COLOR
                     )
                     print(f"[DEBUG] Carrinho existente detectado, redirecionando para {existing_thread.jump_url}.")
                     
                     class NewPurchaseOptionView(discord.ui.View):
-                        def __init__(self, bot_instance, original_interaction):
+                        def __init__(self, bot_instance, original_interaction, current_category_filter, current_category_name):
                             super().__init__(timeout=60)
                             self.bot = bot_instance
                             self.user_id = original_interaction.user.id
-                            self.original_interaction = original_interaction 
+                            self.original_interaction = original_interaction
+                            self.current_category_filter = current_category_filter
+                            self.current_category_name = current_category_name
 
                         @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase")
                         async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
@@ -218,17 +245,16 @@ class ProductCategorySelectView(discord.ui.View):
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
                             
                             embed = discord.Embed(
-                                title="🛒 Selecione um Produto para a Nova Compra",
-                                description="Use o menu abaixo para escolher o produto que deseja comprar.",
+                                title=f"🛒 Selecione um {self.current_category_name} para a Nova Compra",
+                                description=f"Use o menu abaixo para escolher o {self.current_category_name} que deseja comprar.",
                                 color=config.ROSE_COLOR
                             )
                             print(f"[DEBUG] Editando mensagem com nova seleção de produto para {interaction_button.user.name}.")
-                            # Chama a ProductCategorySelectView com a categoria apropriada
-                            await interaction_button.response.edit_message(embed=embed, view=ProductCategorySelectView(self.bot, self.category_filter))
+                            await interaction_button.response.edit_message(embed=embed, view=ProductCategorySelectView(self.bot, self.current_category_filter))
                             print(f"[DEBUG] Mensagem editada com nova seleção de produto.")
                     
                     print(f"[DEBUG] Enviando mensagem de carrinho existente com opção de nova compra para {interaction.user.name}.")
-                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction), ephemeral=True)
+                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, self.category_filter, self.category_filter.capitalize()), ephemeral=True) # Passa a categoria original
                     print(f"[DEBUG] Mensagem de carrinho existente enviada.")
                     return 
                 else:
@@ -420,8 +446,8 @@ class Purchase(commands.Cog):
                             self.bot = bot_instance
                             self.user_id = original_interaction.user.id
                             self.original_interaction = original_interaction
-                            self.current_category_filter = current_category_filter # Passa a categoria original
-                            self.current_category_name = current_category_name # Passa o nome da categoria original
+                            self.current_category_filter = current_category_filter
+                            self.current_category_name = current_category_name
 
                         @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase")
                         async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
@@ -438,7 +464,7 @@ class Purchase(commands.Cog):
                             print(f"[DEBUG] Mensagem editada com nova seleção de produto.")
                     
                     print(f"[DEBUG] Enviando mensagem de carrinho existente com opção de nova compra para {interaction.user.name}.")
-                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, category_filter, category_name), ephemeral=True)
+                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, category_filter, category_name), ephemeral=True) # Passa a categoria original
                     print(f"[DEBUG] Mensagem de carrinho existente enviada.")
                     return 
                 else:
