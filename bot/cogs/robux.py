@@ -187,6 +187,7 @@ class RobuxMainView(discord.ui.View):
                         @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase_from_robux_existing_cart")
                         async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
+                            # Chama o fluxo para Robux novamente
                             await self.bot.get_cog("RobuxCog").robux_command.callback(self.bot.get_cog("RobuxCog"), interaction_button)
                     
                     print(f"[DEBUG] Antes de interaction.response.send_message (Robux Existente).")
