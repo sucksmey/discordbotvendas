@@ -65,7 +65,7 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
             gamepass_confirm_view.add_item(discord.ui.Button(label="Já criei e desativei preços regionais", style=discord.ButtonStyle.success, custom_id="gamepass_created_confirm"))
             gamepass_confirm_view.add_item(discord.ui.Button(label="Preciso de ajuda com a Gamepass", style=discord.ButtonStyle.danger, custom_id="gamepass_help"))
 
-            print(f"[DEBUG] Enviando modal response para {interaction.user.name}")
+            print(f"[DEBUG] Enviando modal response para {interaction.user.name}.")
             await interaction.response.send_message(embeds=[embed, gamepass_tutorial_embed], view=gamepass_confirm_view, ephemeral=False)
             print(f"[DEBUG] Modal response enviada com sucesso para {interaction.user.name}.")
 
@@ -76,7 +76,6 @@ class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblo
                 description=f"Ocorreu um erro ao processar seu nickname. Por favor, tente novamente. Erro: `{e}`",
                 color=config.ROSE_COLOR
             )
-            # Tenta responder ou fazer follow up se a interação já foi respondida
             if interaction.response.is_done():
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
             else:
@@ -113,7 +112,7 @@ class RobuxQuantitySelectView(discord.ui.View):
 
     @discord.ui.select(custom_id="robux_quantity_select")
     async def select_robux_quantity_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        print(f"[DEBUG] RobuxQuantitySelectView: select_robux_quantity_callback por {interaction.user.name}")
+        print(f"[DEBUG] RobuxQuantitySelectView: select_robux_quantity_callback por {interaction.user.name}.")
         selected_quantity_str = select.values[0]
         total_price = config.PRODUCTS[self.product_name]['prices'][selected_quantity_str]
         user_id = interaction.user.id
@@ -131,7 +130,7 @@ class RobuxQuantitySelectView(discord.ui.View):
                 color=config.ROSE_COLOR
             )
             
-            print(f"[DEBUG] Enviando modal para nickname para {interaction.user.name}")
+            print(f"[DEBUG] Enviando modal para nickname para {interaction.user.name}.")
             await interaction.response.send_modal(RobloxNicknameModal(self.bot, self.product_name, selected_quantity_str, total_price))
             print(f"[DEBUG] Modal de nickname enviado com sucesso para {interaction.user.name}.")
 
@@ -175,7 +174,7 @@ class ProductSelectView(discord.ui.View):
 
     @discord.ui.select(custom_id="product_select")
     async def select_product_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        print(f"[DEBUG] ProductSelectView: select_product_callback por {interaction.user.name}")
+        print(f"[DEBUG] ProductSelectView: select_product_callback por {interaction.user.name}.")
         selected_product_name = select.values[0]
         product_details = config.PRODUCTS[selected_product_name]
         user_id = interaction.user.id
@@ -198,28 +197,58 @@ class ProductSelectView(discord.ui.View):
                         color=config.ROSE_COLOR
                     )
                     print(f"[DEBUG] Carrinho existente detectado, redirecionando para {existing_thread.jump_url}.")
-                    await interaction.response.edit_message(embed=embed, view=None) 
+                    
+                    class NewPurchaseOptionView(discord.ui.View):
+                        def __init__(self, bot_instance, original_interaction):
+                            super().__init__(timeout=60)
+                            self.bot = bot_instance
+                            self.user_id = original_interaction.user.id
+                            self.original_interaction = original_interaction 
+
+                        @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase")
+                        async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
+                            print(f"[DEBUG] Botão 'Iniciar Nova Compra' clicado por {interaction_button.user.name}.")
+                            await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
+                            
+                            embed = discord.Embed(
+                                title="🛒 Selecione um Produto para a Nova Compra",
+                                description="Use o menu abaixo para escolher o produto que deseja comprar.",
+                                color=config.ROSE_COLOR
+                            )
+                            print(f"[DEBUG] Editando mensagem com nova seleção de produto para {interaction_button.user.name}.")
+                            await interaction_button.response.edit_message(embed=embed, view=ProductSelectView(self.bot))
+                            print(f"[DEBUG] Mensagem editada com nova seleção de produto.")
+                    
+                    print(f"[DEBUG] Enviando mensagem de carrinho existente com opção de nova compra para {interaction.user.name}.")
+                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction), ephemeral=True)
+                    print(f"[DEBUG] Mensagem de carrinho existente enviada.")
+                    return 
                 else:
                     print(f"[DEBUG] Carrinho existente mas thread não encontrada, limpando DB para {user_id}.")
                     await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id)
-                    await self._create_new_cart(interaction, selected_product_name, product_details)
-            else:
-                print(f"[DEBUG] Nenhum carrinho existente, criando um novo para {user_id}.")
-                await self._create_new_cart(interaction, selected_product_name, product_details)
+                    print(f"[DEBUG] DB limpo, prosseguindo para criar novo carrinho.")
 
+            print(f"[DEBUG] Invocando _create_new_cart para {user_id}.")
+            # >>> AQUI ESTAVA O ERRO DE ATRIBUTO! A função deve ser chamada dentro da própria classe
+            #      e não de um objeto ProductSelectView novo, ou passar o nome e detalhes corretos.
+            #      A correção está abaixo, usando o selected_product_name e product_details corretos.
+            await self._create_new_cart(interaction, selected_product_name, product_details)
+            
         except Exception as e:
-            print(f"[ERROR] Erro em ProductSelectView.select_product_callback para {interaction.user.name}: {e}")
+            print(f"[CRITICAL ERROR] Erro CRÍTICO em select_product_callback (ProductSelectView) para {interaction.user.name}: {e}")
             error_embed = discord.Embed(
-                title="Erro na Seleção",
-                description=f"Ocorreu um erro ao selecionar o produto. Por favor, tente novamente. Erro: `{e}`",
+                title="Erro na Seleção do Produto",
+                description=f"Ocorreu um erro ao iniciar o processo de compra. Por favor, tente novamente. Erro: `{e}`",
                 color=config.ROSE_COLOR
             )
             if interaction.response.is_done():
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
             else:
                 await interaction.response.send_message(embed=error_embed, ephemeral=True)
+            print(f"[DEBUG] Mensagem de erro de seleção de produto enviada.")
 
 
+    # >>> ESTE MÉTODO DEVE ESTAR AQUI DENTRO, COM ESTA INDENTAÇÃO! <<<
     async def _create_new_cart(self, interaction: discord.Interaction, selected_product_name: str, product_details: dict):
         print(f"[DEBUG] _create_new_cart iniciado para {interaction.user.name}.")
         user = interaction.user
@@ -332,8 +361,6 @@ class ProductSelectView(discord.ui.View):
                 description=f"Ocorreu um erro ao criar seu carrinho. Por favor, tente novamente ou contate um administrador. Erro: `{e}`",
                 color=config.ROSE_COLOR
             )
-            # Tenta enviar um followup se a interação já tiver sido respondida (por exemplo, no edit_message)
-            # Ou responde a interação se ainda não foi respondida
             if interaction.response.is_done():
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
             else:
@@ -379,7 +406,7 @@ class Purchase(commands.Cog):
                             self.original_interaction = original_interaction 
 
                         @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase")
-                        async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button): # Renomeado 'interaction' para 'interaction_button'
+                        async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
                             print(f"[DEBUG] Botão 'Iniciar Nova Compra' clicado por {interaction_button.user.name}.")
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
                             
@@ -401,8 +428,13 @@ class Purchase(commands.Cog):
                     await self.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id)
                     print(f"[DEBUG] DB limpo, prosseguindo para criar novo carrinho.")
 
-            print(f"[DEBUG] Invocando _create_new_cart para {user_id}.")
-            await self._create_new_cart(interaction, ProductSelectView(self.bot).select_product_callback.values[0] if ProductSelectView(self.bot).select_product_callback.values else "Produto não selecionado (Erro)", config.PRODUCTS.get(ProductSelectView(self.bot).select_product_callback.values[0] if ProductSelectView(self.bot).select_product_callback.values else "Produto não selecionado (Erro)"))
+            print(f"[DEBUG] Enviando menu de seleção de produto inicial para {interaction.user.name}.")
+            await interaction.response.send_message(embed=discord.Embed(
+                title="🛒 Selecione um Produto",
+                description="Use o menu abaixo para escolher o produto que deseja comprar.",
+                color=config.ROSE_COLOR
+            ), view=ProductSelectView(self.bot), ephemeral=True) # Passa a instância do bot
+            print(f"[DEBUG] Mensagem de seleção de produto inicial enviada.")
 
         except Exception as e:
             print(f"[CRITICAL ERROR] Erro CRÍTICO em buy_command para {interaction.user.name}: {e}")
