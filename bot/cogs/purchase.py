@@ -529,97 +529,298 @@ class ProductSelectView(discord.ui.View):
             print(f"[DEBUG] Mensagem de erro de carrinho enviada.")
 
 
-# Listener para o botão "Voltar para Categorias" (para menus de 2o nível)
-@commands.Cog.listener("on_interaction")
-async def on_back_to_parent_category_button(interaction: discord.Interaction):
-    if interaction.type == discord.InteractionType.component and interaction.data.get("custom_id").startswith("back_to_parent_category_"):
-        print(f"[DEBUG] Botão 'Voltar para Categorias' clicado por {interaction.user.name}.")
-        parent_category_filter = interaction.data["custom_id"].replace("back_to_parent_category_", "")
+# Nova View para seleção de subcategoria de jogos
+class GameSubcategorySelectView(discord.ui.View):
+    def __init__(self, bot_instance):
+        super().__init__(timeout=180)
+        self.bot = bot_instance
         
-        # O self.bot não está acessível diretamente em listeners fora de cogs ou views.
-        # Use interaction.client para acessar a instância do bot.
-        bot_instance = interaction.client
+        game_subcategories = set()
+        for product_name, details in config.PRODUCTS.items():
+            if details.get('category') == 'jogos' and 'sub_category' in details:
+                game_subcategories.add(details['sub_category'])
         
-        if parent_category_filter == "jogos":
-            embed = discord.Embed(
-                title="🎮 Selecione o Tipo de Jogo",
-                description="Use o menu abaixo para escolher o tipo de jogo que você busca.",
-                color=config.ROSE_COLOR
-            )
-            print(f"[DEBUG] Antes de interaction.response.edit_message (Voltar Jogos).")
-            await interaction.response.edit_message(embed=embed, view=GameSubcategorySelectView(bot_instance))
-            print(f"[DEBUG] Após interaction.response.edit_message (Voltar Jogos).")
-        elif parent_category_filter == "giftcard":
-            embed = discord.Embed(
-                title="💳 Selecione a Marca do Giftcard",
-                description="Use o menu abaixo para escolher a marca de Giftcard que você deseja comprar.",
-                color=config.ROSE_COLOR
-            )
-            print(f"[DEBUG] Antes de interaction.response.edit_message (Voltar Giftcard).")
-            await interaction.response.edit_message(embed=embed, view=GiftcardBrandSelectView(bot_instance))
-            print(f"[DEBUG] Após interaction.response.edit_message (Voltar Giftcard).")
-        else:
-            print(f"[DEBUG] Antes de interaction.response.send_message (Voltar Erro).")
-            await interaction.response.send_message("Não foi possível voltar para a categoria anterior.", ephemeral=True)
-            print(f"[DEBUG] Após interaction.response.send_message (Voltar Erro).")
-        print(f"[DEBUG] Redirecionado para seleção de categoria pai: {parent_category_filter}.")
+        options = []
+        for sub_cat in sorted(list(game_subcategories)):
+            options.append(discord.SelectOption(label=sub_cat, value=sub_cat))
+        
+        print(f"[DEBUG] GameSubcategorySelectView: Número total de subcategorias geradas: {len(options)}.")
 
-
-# Listener para o botão "Pegar Ticket"
-@commands.Cog.listener("on_interaction")
-async def on_interaction_ticket_button(interaction: discord.Interaction):
-    if interaction.type == discord.InteractionType.component and interaction.data.get("custom_id") == "get_cart_ticket":
-        print(f"[DEBUG] Botão 'Pegar Ticket' clicado por {interaction.user.name}.")
-        if interaction.channel.type != discord.ChannelType.private_thread:
-            print(f"[DEBUG] Interação de ticket fora de thread privada, ignorando.")
-            return
-
-        user_id = interaction.user.id
-        try:
-            # Pega o product_name do DB
-            cart_info = await interaction.client.db.fetch_one( # Acessa o DB via interaction.client.db
-                "SELECT cart_product_name FROM users WHERE user_id = $1 AND cart_thread_id = $2",
-                user_id, interaction.channel.id
-            )
-
-            if not cart_info:
-                print(f"[DEBUG] Carrinho não ativo ou não iniciado por {user_id}.")
-                print(f"[DEBUG] Antes de interaction.response.send_message (Ticket Erro - Carrinho).")
-                await interaction.response.send_message("Este não é um carrinho ativo ou você não o iniciou.", ephemeral=True)
-                print(f"[DEBUG] Após interaction.response.send_message (Ticket Erro - Carrinho).")
-                return
-            
-            product_name = cart_info['cart_product_name']
-            admin_role = interaction.guild.get_role(config.ADMIN_ROLE_ID)
-
-            if admin_role:
-                embed = discord.Embed(
-                    title="🎫 Ticket Solicitado!",
-                    description=f"{admin_role.mention}, o usuário {interaction.user.name} solicitou ajuda para a compra de **{product_name}**.\n\n"
-                                "Um atendente estará com você em breve.",
-                    color=config.ROSE_COLOR
+        if options:
+            self.add_item(
+                discord.ui.Select(
+                    placeholder="Selecione um tipo de jogo...",
+                    min_values=1,
+                    max_values=1,
+                    options=options[:25],
+                    custom_id="game_subcategory_select"
                 )
-                print(f"[DEBUG] Enviando notificação de ticket para admin e {interaction.user.name}.")
-                print(f"[DEBUG] Antes de interaction.response.send_message (Ticket Sucesso).")
-                await interaction.response.send_message(embed=embed)
-                print(f"[DEBUG] Após interaction.response.send_message (Ticket Sucesso).")
-            else:
-                print(f"[WARNING] Cargo de Admin ({config.ADMIN_ROLE_ID}) não encontrado para notificar ticket.")
-                print(f"[DEBUG] Antes de interaction.response.send_message (Ticket Erro - Admin).")
-                await interaction.response.send_message("Não foi possível encontrar o cargo de administrador para notificar.", ephemeral=True)
-                print(f"[DEBUG] Após interaction.response.send_message (Ticket Erro - Admin).")
+            )
+        else:
+            print(f"[ERROR] GameSubcategorySelectView: Nenhuma subcategoria de jogos encontrada.")
+            self.add_item(discord.ui.Button(label="Nenhum tipo de jogo encontrado.", style=discord.ButtonStyle.red, disabled=True))
+
+    @discord.ui.select(custom_id="game_subcategory_select")
+    async def select_subcategory_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        print(f"[DEBUG] GameSubcategorySelectView: select_subcategory_callback por {interaction.user.name}.")
+        selected_subcategory = select.values[0]
+        
+        products_in_subcategory_flat = {}
+        for product_name, details in config.PRODUCTS.items():
+            if details.get('category') == 'jogos' and details.get('sub_category') == selected_subcategory:
+                for item_name, item_price in details['prices'].items():
+                    products_in_subcategory_flat[item_name] = item_price
+        
+        embed = discord.Embed(
+            title=f"🛒 Selecione um Jogo ({selected_subcategory})",
+            description="Use o menu abaixo para escolher o jogo que deseja comprar.",
+            color=config.ROSE_COLOR
+        )
+        print(f"[DEBUG] Antes de interaction.response.edit_message (Game Subcategory Select).")
+        await interaction.response.edit_message(
+            embed=embed, 
+            view=ProductSelectView(self.bot, products_in_subcategory_flat, "Jogo", parent_category_filter="jogos")
+        )
+        print(f"[DEBUG] Após interaction.response.edit_message (Game Subcategory Select).")
+
+
+# Nova View para seleção de marca de giftcard
+class GiftcardBrandSelectView(discord.ui.View):
+    def __init__(self, bot_instance):
+        super().__init__(timeout=180)
+        self.bot = bot_instance
+        
+        giftcard_brands = set()
+        for product_name, details in config.PRODUCTS.items():
+            if details.get('category') == 'giftcard':
+                giftcard_brands.add(product_name)
+        
+        options = []
+        for brand_name in sorted(list(giftcard_brands)):
+            options.append(discord.SelectOption(label=brand_name, value=brand_name))
+        
+        print(f"[DEBUG] GiftcardBrandSelectView: Número total de marcas geradas: {len(options)}.")
+
+        if options:
+            self.add_item(
+                discord.ui.Select(
+                    placeholder="Selecione uma marca de Giftcard...",
+                    min_values=1,
+                    max_values=1,
+                    options=options[:25],
+                    custom_id="giftcard_brand_select"
+                )
+            )
+        else:
+            print(f"[ERROR] GiftcardBrandSelectView: Nenhuma marca de giftcard encontrada.")
+            self.add_item(discord.ui.Button(label="Nenhum tipo de jogo encontrado.", style=discord.ButtonStyle.red, disabled=True))
+
+    @discord.ui.select(custom_id="giftcard_brand_select")
+    async def select_brand_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        print(f"[DEBUG] GiftcardBrandSelectView: select_brand_callback por {interaction.user.name}.")
+        selected_brand = select.values[0]
+        
+        products_in_brand_flat = {}
+        if selected_brand in config.PRODUCTS and 'prices' in config.PRODUCTS[selected_brand]:
+            for item_name, item_price in config.PRODUCTS[selected_brand]['prices'].items():
+                products_in_brand_flat[item_name] = item_price
+        
+        embed = discord.Embed(
+            title=f"🛒 Selecione um Giftcard ({selected_brand})",
+            description="Use o menu abaixo para escolher o giftcard que deseja comprar.",
+            color=config.ROSE_COLOR
+        )
+        print(f"[DEBUG] Antes de interaction.response.edit_message (Giftcard Brand Select).")
+        await interaction.response.edit_message(
+            embed=embed, 
+            view=ProductSelectView(self.bot, products_in_brand_flat, "Giftcard", parent_category_filter="giftcard")
+        )
+        print(f"[DEBUG] Após interaction.response.edit_message (Giftcard Brand Select).")
+
+
+# Classe principal do Cog
+class Purchase(commands.Cog):
+    def __init__(self, bot: discord.Client):
+        self.bot = bot
+        self.db = bot.db
+
+    # Novos comandos separados por categoria
+    @discord.app_commands.command(name="robux", description="Compre Robux para Roblox.")
+    async def robux_command(self, interaction: discord.Interaction):
+        print(f"[DEBUG] Comando /robux recebido de {interaction.user.name}.")
+        embed = discord.Embed(
+            title="💎 Central de Robux",
+            description="Escolha uma opção para continuar.",
+            color=config.ROSE_COLOR
+        )
+        print(f"[DEBUG] Antes de interaction.response.send_message (Robux Command).")
+        await interaction.response.send_message(embed=embed, view=RobuxMainView(self.bot), ephemeral=False)
+        print(f"[DEBUG] Após interaction.response.send_message (Robux Command).")
+
+
+    @discord.app_commands.command(name="jogos", description="Compre itens para outros jogos (Valorant, Free Fire, etc.).")
+    async def games_command(self, interaction: discord.Interaction):
+        print(f"[DEBUG] Comando /jogos recebido de {interaction.user.name}.")
+        embed = discord.Embed(
+            title="🎮 Selecione o Tipo de Jogo",
+            description="Use o menu abaixo para escolher o tipo de jogo que você busca.",
+            color=config.ROSE_COLOR
+        )
+        print(f"[DEBUG] Antes de interaction.response.send_message (Games Command).")
+        await interaction.response.send_message(embed=embed, view=GameSubcategorySelectView(self.bot), ephemeral=True)
+        print(f"[DEBUG] Após interaction.response.send_message (Games Command).")
+
+
+    @discord.app_commands.command(name="giftcard", description="Compre Giftcards (PlayStation, Xbox, Google Play, Apple).")
+    async def giftcard_command(self, interaction: discord.Interaction):
+        print(f"[DEBUG] Comando /giftcard recebido de {interaction.user.name}.")
+        embed = discord.Embed(
+            title="💳 Selecione a Marca do Giftcard",
+            description="Use o menu abaixo para escolher a marca de Giftcard que você deseja comprar.",
+            color=config.ROSE_COLOR
+        )
+        print(f"[DEBUG] Antes de interaction.response.send_message (Giftcard Command).")
+        await interaction.response.send_message(embed=embed, view=GiftcardBrandSelectView(self.bot), ephemeral=True)
+        print(f"[DEBUG] Após interaction.response.send_message (Giftcard Command).")
+
+
+    # Função unificada para lidar com o primeiro nível de seleção (não é mais usada diretamente pelos comandos slash)
+    async def _handle_product_category_command(self, interaction: discord.Interaction, products_dict_flat: dict, category_filter: str, category_name: str):
+        user_id = interaction.user.id
+        print(f"[DEBUG] _handle_product_category_command iniciado para {user_id} com categoria '{category_filter}'.")
+
+        try:
+            current_cart = await self.db.fetch_one(
+                "SELECT cart_thread_id, cart_product_name FROM users WHERE user_id = $1 AND cart_thread_id IS NOT NULL",
+                user_id
+            )
+            print(f"[DEBUG] Verificação de carrinho em andamento para {user_id}: {current_cart is not None}.")
+
+            if current_cart:
+                existing_thread_id = current_cart['cart_thread_id']
+                existing_thread = interaction.guild.get_thread(existing_thread_id)
+                
+                if existing_thread:
+                    embed = discord.Embed(
+                        title="🛒 Você já tem um carrinho!",
+                        description=f"Você já possui um carrinho em andamento! [Clique aqui para acessá-lo]({existing_thread.jump_url}).\n\nDeseja iniciar uma **nova compra**?",
+                        color=config.ROSE_COLOR
+                    )
+                    print(f"[DEBUG] Carrinho existente detectado, redirecionando para {existing_thread.jump_url}.")
+                    
+                    class NewPurchaseOptionView(discord.ui.View):
+                        def __init__(self, bot_instance, original_interaction, current_category_filter_param, current_category_name_param):
+                            super().__init__(timeout=60)
+                            self.bot = bot_instance
+                            self.user_id = original_interaction.user.id
+                            self.original_interaction = original_interaction
+                            self.current_category_filter = current_category_filter_param
+                            self.current_category_name = current_category_name_param
+
+                        @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase")
+                        async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
+                            print(f"[DEBUG] Botão 'Iniciar Nova Compra' clicado por {interaction_button.user.name}.")
+                            await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
+                            
+                            if self.current_category_filter == "robux":
+                                await self.bot.get_cog("Purchase").robux_command.callback(self.bot.get_cog("Purchase"), interaction_button)
+                            elif self.current_category_filter == "jogos":
+                                await self.bot.get_cog("Purchase").games_command.callback(self.bot.get_cog("Purchase"), interaction_button)
+                            elif self.current_category_filter == "giftcard":
+                                await self.bot.get_cog("Purchase").giftcard_command.callback(self.bot.get_cog("Purchase"), interaction_button)
+                            else:
+                                await interaction_button.response.send_message("Não foi possível recarregar a categoria anterior. Por favor, use um comando de compra novamente.", ephemeral=True)
+
+                            print(f"[DEBUG] Mensagem editada com nova seleção de produto.")
+                    
+                    print(f"[DEBUG] Enviando mensagem de carrinho existente com opção de nova compra para {interaction.user.name}.")
+                    print(f"[DEBUG] Antes de interaction.response.send_message (handle_category_command Existente).")
+                    await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction, category_filter, category_name), ephemeral=True)
+                    print(f"[DEBUG] Após interaction.response.send_message (handle_category_command Existente).")
+                    return 
+                else:
+                    print(f"[DEBUG] Carrinho existente mas thread não encontrada, limpando DB para {user_id}.")
+                    await self.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id)
+                    print(f"[DEBUG] DB limpo, prosseguindo para criar novo carrinho.")
+
+            embed = discord.Embed(
+                title=f"🛒 Selecione um {category_name}",
+                description=f"Use o menu abaixo para escolher o {category_name} que deseja comprar.",
+                color=config.ROSE_COLOR
+            )
+            print(f"[DEBUG] Enviando menu de seleção de {category_name} para {interaction.user.name}.")
+            print(f"[DEBUG] Antes de interaction.response.send_message (handle_category_command Novo).")
+            await interaction.response.send_message(embed=embed, view=ProductSelectView(self.bot, products_dict_flat, category_name, parent_category_filter=category_filter), ephemeral=True)
+            print(f"[DEBUG] Após interaction.response.send_message (handle_category_command Novo).")
+
         except Exception as e:
-            print(f"[ERROR] Erro em on_interaction_ticket_button para {interaction.user.name}: {e}")
+            print(f"[CRITICAL ERROR] Erro CRÍTICO em _handle_product_category_command para {interaction.user.name}: {e}")
             error_embed = discord.Embed(
-                title="Erro no Ticket",
-                description=f"Ocorreu um erro ao solicitar o ticket. Erro: `{e}`",
+                title=f"Erro no Comando /{category_filter}",
+                description=f"Ocorreu um erro ao iniciar o processo de compra de {category_name}. Por favor, tente novamente. Erro: `{e}`",
                 color=config.ROSE_COLOR
             )
             if interaction.response.is_done():
                 await interaction.followup.send(embed=error_embed, ephemeral=True)
             else:
                 await interaction.response.send_message(embed=error_embed, ephemeral=True)
-            print(f"[DEBUG] Mensagem de erro de ticket enviada.")
+            print(f"[DEBUG] Mensagem de erro para /{category_filter} enviada.")
+
+
+    # Listener para o botão "Pegar Ticket"
+    @commands.Cog.listener("on_interaction")
+    async def on_interaction_ticket_button(self, interaction: discord.Interaction):
+        if interaction.type == discord.InteractionType.component and interaction.data.get("custom_id") == "get_cart_ticket":
+            print(f"[DEBUG] Botão 'Pegar Ticket' clicado por {interaction.user.name}.")
+            if interaction.channel.type != discord.ChannelType.private_thread:
+                print(f"[DEBUG] Interação de ticket fora de thread privada, ignorando.")
+                return
+
+            user_id = interaction.user.id
+            try:
+                cart_info = await interaction.client.db.fetch_one(
+                    "SELECT cart_product_name FROM users WHERE user_id = $1 AND cart_thread_id = $2",
+                    user_id, interaction.channel.id
+                )
+
+                if not cart_info:
+                    print(f"[DEBUG] Carrinho não ativo ou não iniciado por {user_id}.")
+                    print(f"[DEBUG] Antes de interaction.response.send_message (Ticket Erro - Carrinho).")
+                    await interaction.response.send_message("Este não é um carrinho ativo ou você não o iniciou.", ephemeral=True)
+                    print(f"[DEBUG] Após interaction.response.send_message (Ticket Erro - Carrinho).")
+                    return
+                
+                product_name = cart_info['cart_product_name']
+                admin_role = interaction.guild.get_role(config.ADMIN_ROLE_ID)
+
+                if admin_role:
+                    embed = discord.Embed(
+                        title="🎫 Ticket Solicitado!",
+                        description=f"{admin_role.mention}, o usuário {interaction.user.name} solicitou ajuda para a compra de **{product_name}**.\n\n"
+                                    "Um atendente estará com você em breve.",
+                        color=config.ROSE_COLOR
+                    )
+                    print(f"[DEBUG] Enviando notificação de ticket para admin e {interaction.user.name}.")
+                    print(f"[DEBUG] Antes de interaction.response.send_message (Ticket Sucesso).")
+                    await interaction.response.send_message(embed=embed)
+                    print(f"[DEBUG] Após interaction.response.send_message (Ticket Sucesso).")
+                else:
+                    print(f"[WARNING] Cargo de Admin ({config.ADMIN_ROLE_ID}) não encontrado para notificar ticket.")
+                    print(f"[DEBUG] Antes de interaction.response.send_message (Ticket Erro - Admin).")
+                    await interaction.response.send_message("Não foi possível encontrar o cargo de administrador para notificar.", ephemeral=True)
+                    print(f"[DEBUG] Após interaction.response.send_message (Ticket Erro - Admin).")
+            except Exception as e:
+                print(f"[ERROR] Erro em on_interaction_ticket_button para {interaction.user.name}: {e}")
+                error_embed = discord.Embed(
+                    title="Erro no Ticket",
+                    description=f"Ocorreu um erro ao solicitar o ticket. Erro: `{e}`",
+                    color=config.ROSE_COLOR
+                )
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=error_embed, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                print(f"[DEBUG] Mensagem de erro de ticket enviada.")
 
 
 # Listener para o botão "Já criei e desativei preços regionais"
