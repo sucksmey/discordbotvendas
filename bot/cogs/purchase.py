@@ -5,6 +5,7 @@ from discord.ext import commands
 import config
 import uuid # Para gerar IDs únicos de pedido
 import asyncio # Para simular um delay
+from datetime import datetime
 
 # --- Modals ---
 class RobloxNicknameModal(discord.ui.Modal, title="Informe seu Nickname no Roblox"):
@@ -184,7 +185,9 @@ class ProductSelectView(discord.ui.View):
             )
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
-        thread_name = f"carrinho-{user.name}-{str(uuid.uuid4())[:4]}"
+        # Usar um timestamp para o nome da thread para garantir unicidade e ordenação
+        timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
+        thread_name = f"carrinho-{user.name}-{timestamp_str}"
         
         try:
             new_thread = await parent_channel.create_thread(
@@ -273,7 +276,7 @@ class Purchase(commands.Cog):
         self.db = bot.db # Acessa o DB que foi anexado ao objeto bot
 
     # Comando de barra para iniciar o processo de compra
-    @discord.app_commands.command(name="comprar", description="Inicia o processo de compra de produtos.")
+    @discord.app_commands.command(name="comprar2", description="Inicia o processo de compra de produtos (versão 2).")
     async def buy_command(self, interaction: discord.Interaction):
         current_cart = await self.db.fetch_one(
             "SELECT cart_thread_id, cart_product_name FROM users WHERE user_id = $1 AND cart_thread_id IS NOT NULL",
@@ -412,4 +415,4 @@ class Purchase(commands.Cog):
 
 # Função setup para adicionar o cog ao bot
 async def setup(bot: commands.Bot):
-    await bot.add_cog(Purchase(bot)) # Não passa 'db' aqui
+    await bot.add_cog(Purchase(bot))
