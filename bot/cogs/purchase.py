@@ -733,3 +733,5 @@ async def setup(bot: commands.Bot):
     bot.add_listener(on_interaction_ticket_button)
     bot.add_listener(on_interaction_gamepass_confirm_button)
     await bot.add_cog(Purchase(bot))
+
+#bluuuuuu
