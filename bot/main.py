@@ -40,7 +40,7 @@ intents.presences = True
 # Inicializa o bot
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Instância do banco de dados - AGORA PASSA A DATABASE_URL
+# Instância do banco de dados
 db = Database(DATABASE_URL)
 # Anexa a instância do DB ao objeto bot para fácil acesso em cogs
 bot.db = db
@@ -57,10 +57,9 @@ async def on_ready():
 
     # Sincroniza os comandos de barra (slash commands) com o Discord
     try:
-        # Sincroniza comandos APENAS para o seu servidor de teste (mais rápido)
-        guild_obj = discord.Object(id=config.GUILD_ID) 
-        await bot.tree.sync(guild=guild_obj)
-        print(f"Comandos de barra (slash commands) sincronizados para a guild: {config.GUILD_ID}!")
+        # Sincroniza comandos GLOBALMENTE (pode levar até 1 hora para aparecer)
+        await bot.tree.sync() # <<< MUDANÇA AQUI
+        print("Comandos de barra (slash commands) sincronizados GLOBALMENTE!")
     except Exception as e:
         print(f"Erro ao sincronizar comandos de barra: {e}")
 
