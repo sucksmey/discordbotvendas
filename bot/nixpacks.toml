@@ -1,5 +1,0 @@
-# nixpacks.toml
-#forçaratt
-
-[packages]
-apt = ["postgresql-client-dev"]
