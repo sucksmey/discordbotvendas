@@ -3,8 +3,8 @@
 import discord
 from discord.ext import commands
 import config
-import uuid # Para gerar IDs únicos de pedido
-import asyncio # Para simular um delay
+import uuid
+import asyncio
 from datetime import datetime
 
 # --- Modals ---
