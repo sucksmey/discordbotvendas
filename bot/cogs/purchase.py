@@ -187,18 +187,16 @@ class RobuxMainView(discord.ui.View):
                         @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase_from_robux_existing_cart")
                         async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
-                            # Chama o fluxo para Robux novamente
                             await self.bot.get_cog("Purchase").robux_command.callback(self.bot.get_cog("Purchase"), interaction_button)
                     await interaction.response.send_message(embed=embed, view=NewPurchaseOptionView(self.bot, interaction), ephemeral=True)
                     return
                 else:
                     await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", user_id)
 
-            # Inicia o processo de criação de carrinho para Robux
             await self.bot.get_cog("Purchase")._create_new_cart(
                 interaction,
                 product_name,
-                config.PRODUCTS[product_name] # Passa os detalhes completos do produto Robux
+                config.PRODUCTS[product_name]
             )
             
         except Exception as e:
@@ -245,22 +243,15 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
 
         options = []
         for name, price_info in products_dict.items():
-            # Aqui 'price_info' pode ser um float (para jogos/giftcards) ou um dict (para Robux, mas Robux tem sua própria view de quantidade)
-            # Para jogos/giftcards, 'name' é o nome do produto e 'price_info' é o preço.
-            # Se fosse Robux, 'name' seria a quantidade e 'price_info' o preço.
-            # Vamos garantir que o label seja adequado.
-            
-            # Ajuste para labels de produtos (ex: "R$50", "400 VP")
             label_text = name 
             if isinstance(price_info, (int, float)): # Se for um preço direto (jogos/giftcards)
-                label_text = f"{name} (R$ {price_info:.2f})" 
-            elif isinstance(price_info, dict) and 'prices' in price_info: # Se for um Robux (só o nome principal "Robux")
-                # Isso não deve acontecer aqui se o filtro por categoria estiver certo,
-                # mas é um fallback de segurança.
-                label_text = name
+                label_text = f"{name} (R$ {price_info:.2f})"
+            
+            # --- Adicionado repr() para depuração de caracteres invisíveis ---
+            print(f"[DEBUG] ProductSelectView (adaptada) - Opção '{self.category_name}':")
+            print(f"    Label (repr): {repr(label_text)} (len: {len(label_text)})")
+            print(f"    Value (repr): {repr(name)} (len: {len(name)})")
 
-            # Removemos description e emoji para o teste, conforme seu código funcional
-            # E adicionamos a verificação de comprimento para o label
             if len(label_text) > 100:
                 print(f"[WARNING] Label '{label_text}' excede 100 caracteres. Será truncado.")
                 label_text = label_text[:97] + "..."
@@ -268,49 +259,39 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
             options.append(
                 discord.SelectOption(
                     label=label_text,
-                    value=name # O valor é o nome original do produto/quantidade
+                    value=name
                 )
             )
         
-        # >>> NOVO PRINT DE DEBUG AQUI <<<
-        print(f"[DEBUG] ProductSelectView (adaptada): Número total de opções geradas para '{category_name}': {len(options)}.")
+        print(f"[DEBUG] ProductSelectView (adaptada): Número total de opções geradas para '{self.category_name}': {len(options)}.")
         
-        # >>> AQUI ESTÁ A VERIFICAÇÃO CRUCIAL (do seu bot antigo que funciona)! <<<
-        if options: 
+        if options: # AQUI ESTÁ A VERIFICAÇÃO CRUCIAL (do seu bot antigo que funciona)!
             self.add_item(
                 discord.ui.Select(
-                    placeholder=f"Selecione um {category_name}...",
+                    placeholder=f"Selecione um {self.category_name}...",
                     min_values=1,
                     max_values=1,
                     options=options,
-                    custom_id=f"product_select_{category_name}"
+                    custom_id=f"product_select_{self.category_name}"
                 )
             )
         else:
-            print(f"[ERROR] ProductSelectView (adaptada): Nenhuma opção gerada para '{category_name}'. O SelectMenu não será adicionado.")
-            # Você pode adicionar um botão de "voltar" ou "ajuda" aqui se quiser
+            print(f"[ERROR] ProductSelectView (adaptada): Nenhuma opção gerada para '{self.category_name}'. O SelectMenu não será adicionado.")
             self.add_item(discord.ui.Button(label="Nenhum item encontrado nesta categoria.", style=discord.ButtonStyle.red, disabled=True))
 
 
-    @discord.ui.select() # O custom_id é inferido automaticamente do custom_id definido no add_item se não for especificado aqui
+    @discord.ui.select()
     async def select_product_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
         print(f"[DEBUG] ProductSelectView (adaptada): select_product_callback por {interaction.user.name}.")
         selected_product_name = select.values[0]
         
-        # O selected_product_name aqui será o 'value' do SelectOption.
-        # Para Jogos/Giftcards: será o nome do jogo/card (ex: "Valorant", "R$50")
-        # Para Robux: será a quantidade (ex: "100 Robux")
-        
-        # Precisamos encontrar os detalhes completos do produto no config.PRODUCTS
         product_details = None
         for name, details in config.PRODUCTS.items():
-            if name == selected_product_name:
+            if name == selected_product_name: # Se o item selecionado é um produto principal (ex: "Robux", "Valorant")
                 product_details = details
                 break
-            # Se for um item de preço (como "R$50"), ele pode estar dentro do dicionário 'prices' de um produto
-            if 'prices' in details and selected_product_name in details['prices']:
-                product_details = details # Este seria o produto "pai" (ex: "PlayStation Store")
-                # E o selected_product_name seria o item específico (ex: "R$50")
+            if 'prices' in details and selected_product_name in details['prices']: # Se o item selecionado é um sub-item (ex: "400 VP", "R$50")
+                product_details = details # Pega o produto pai
                 break
         
         if not product_details:
@@ -344,27 +325,19 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                     print(f"[DEBUG] Carrinho existente detectado, redirecionando para {existing_thread.jump_url}.")
                     
                     class NewPurchaseOptionView(discord.ui.View):
-                        def __init__(self, bot_instance, original_interaction, current_category_filter, current_category_name):
+                        def __init__(self, bot_instance, original_interaction, current_category_filter_param, current_category_name_param):
                             super().__init__(timeout=60)
                             self.bot = bot_instance
                             self.user_id = original_interaction.user.id
                             self.original_interaction = original_interaction
-                            self.current_category_filter = current_category_filter
-                            self.current_category_name = current_category_name
+                            self.current_category_filter = current_category_filter_param
+                            self.current_category_name = current_category_name_param
 
                         @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green, custom_id="start_new_purchase")
                         async def start_new_purchase_button(self, interaction_button: discord.Interaction, button: discord.ui.Button):
                             print(f"[DEBUG] Botão 'Iniciar Nova Compra' clicado por {interaction_button.user.name}.")
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
                             
-                            embed = discord.Embed(
-                                title=f"🛒 Selecione um {self.current_category_name} para a Nova Compra",
-                                description=f"Use o menu abaixo para escolher o {self.current_category_name} que deseja comprar.",
-                                color=config.ROSE_COLOR
-                            )
-                            print(f"[DEBUG] Editando mensagem com nova seleção de produto para {interaction_button.user.name}.")
-                            # Este ponto precisaria saber qual a categoria pai para recriar a view correta
-                            # Para simplificar, vou redirecionar para o comando pai
                             if self.current_category_filter == "robux":
                                 await self.bot.get_cog("Purchase").robux_command.callback(self.bot.get_cog("Purchase"), interaction_button)
                             elif self.current_category_filter == "jogos":
@@ -372,8 +345,8 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                             elif self.current_category_filter == "giftcard":
                                 await self.bot.get_cog("Purchase").giftcard_command.callback(self.bot.get_cog("Purchase"), interaction_button)
                             else:
-                                await interaction_button.response.send_message("Não foi possível recarregar a categoria anterior.", ephemeral=True)
-                            
+                                await interaction_button.response.send_message("Não foi possível recarregar a categoria anterior. Por favor, use um comando de compra novamente.", ephemeral=True)
+
                             print(f"[DEBUG] Mensagem editada com nova seleção de produto.")
                     
                     print(f"[DEBUG] Enviando mensagem de carrinho existente com opção de nova compra para {interaction.user.name}.")
@@ -386,24 +359,17 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                     print(f"[DEBUG] DB limpo, prosseguindo para criar novo carrinho.")
 
             print(f"[DEBUG] Invocando _create_new_cart para {user_id} com produto: {selected_product_name}.")
-            # Se o selected_product_name for um item de preço (ex: "R$50"), product_details é o pai (ex: "PlayStation Store")
-            # Precisamos do item de preço real e seu valor.
-            # Se o product_details tiver um 'prices' e o selected_product_name não for a chave principal, então é um sub-item.
             actual_product_name_for_cart = selected_product_name
-            actual_product_details_for_cart = product_details # Assume que é o produto principal
+            actual_product_details_for_cart = product_details 
 
             if 'prices' in product_details and selected_product_name in product_details['prices']:
-                # Significa que selected_product_name é um sub-item (ex: "400 VP", "R$50")
-                # e product_details é o produto pai (ex: "Valorant", "PlayStation Store")
-                # Então, o que vai para o carrinho é o sub-item e o preço específico dele.
-                actual_product_name_for_cart = f"{product_details['emoji']} {product_details['category'].capitalize()} - {selected_product_name}" # Formatar para clareza no carrinho
-                actual_product_details_for_cart = { # Crie um dict temporário com os detalhes do sub-item
+                actual_product_name_for_cart = f"{product_details['emoji']} {product_details['category'].capitalize()} - {selected_product_name}"
+                actual_product_details_for_cart = { 
                     'name': selected_product_name,
                     'price': product_details['prices'][selected_product_name],
                     'type': product_details['type'],
                     'category': product_details['category']
                 }
-
 
             await self._create_new_cart(interaction, actual_product_name_for_cart, actual_product_details_for_cart)
             
@@ -462,9 +428,6 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                 print(f"[WARNING] Cargo de Admin ({config.ADMIN_ROLE_ID}) não encontrado para adicionar à thread.")
 
             print(f"[DEBUG] Salvando carrinho no DB para {user.name}.")
-            # Se selected_product_name já é o nome formatado, e product_details é o sub-dict
-            # Ou se selected_product_name é o produto principal.
-            # O importante é salvar o nome que o usuário realmente selecionou.
             await self.bot.db.execute(
                 """
                 INSERT INTO users (user_id, cart_thread_id, cart_product_name, cart_status)
@@ -472,7 +435,7 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                 ON CONFLICT (user_id) DO UPDATE
                 SET cart_thread_id = $2, cart_product_name = $3, cart_status = $4, roblox_nickname = NULL, last_cart_update = CURRENT_TIMESTAMP
                 """,
-                user.id, new_thread.id, selected_product_name, 'in_progress' # Salva o nome selecionado originalmente
+                user.id, new_thread.id, selected_product_name, 'in_progress'
             )
             print(f"[DEBUG] Carrinho salvo no DB para {user.name}.")
 
@@ -508,10 +471,7 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                  await logs_channel.send(embed=log_embed)
                  print(f"[DEBUG] Log enviado para canal de carrinhos em andamento.")
 
-            # A lógica para continuar o fluxo (Robux vs Manual) precisa ser ajustada aqui.
-            # Se o selected_product_name for Robux, ou se for um item de Robux (ex: "100 Robux")
-            if (product_details.get('type') == 'automatized' and product_details.get('category') == 'robux') or \
-               (selected_product_name in config.PRODUCTS.get("Robux", {}).get("prices", {})):
+            if product_details.get('type') == 'automatized' and product_details.get('category') == 'robux':
                 print(f"[DEBUG] Produto automatizado (Robux), enviando seleção de quantidade para {user.name}.")
                 await new_thread.send(
                     embed=discord.Embed(
@@ -519,7 +479,7 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                         description="Escolha a quantidade de Robux que deseja comprar.",
                         color=config.ROSE_COLOR
                     ),
-                    view=RobuxQuantitySelectView(self.bot, "Robux") # Passa o nome do produto principal "Robux"
+                    view=RobuxQuantitySelectView(self.bot, "Robux")
                 )
                 print(f"[DEBUG] Seleção de quantidade enviada.")
 
@@ -529,7 +489,6 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
                 await new_thread.send(f"{admin_role.mention}, um atendimento manual é necessário para esta compra. Aguarde um momento por favor.")
                 print(f"[DEBUG] Admin notificado para produto manual.")
             else:
-                # Fallback para caso não se encaixe em automatizado nem manual ou seja um sub-item sem lógica clara
                 print(f"[WARNING] Tipo de produto não definido para automação ou manual. Notificando admin.")
                 admin_role = guild.get_role(config.ADMIN_ROLE_ID)
                 await new_thread.send(f"{admin_role.mention}, a compra de {selected_product_name} requer atendimento. Aguarde um momento por favor.")
@@ -551,7 +510,7 @@ class ProductSelectView(discord.ui.View): # Renomeada para ProductSelectView par
 
 # Classe principal do Cog
 class Purchase(commands.Cog):
-    def __init__(self, bot: discord.Client): # Ajustado para discord.Client para melhor compatibilidade com types
+    def __init__(self, bot: discord.Client):
         self.bot = bot
         self.db = bot.db
 
@@ -574,9 +533,8 @@ class Purchase(commands.Cog):
         game_products_flat = {}
         for product_name, details in config.PRODUCTS.items():
             if details.get('category') == "jogos":
-                # Adiciona todos os sub-produtos (preços) do jogo ao dicionário plano
                 for item_name, item_price in details['prices'].items():
-                    game_products_flat[item_name] = item_price # Ex: {"400 VP": 19.00}
+                    game_products_flat[item_name] = item_price
         
         await self._handle_product_category_command(interaction, game_products_flat, "jogos", "Jogos")
 
@@ -587,13 +545,11 @@ class Purchase(commands.Cog):
         giftcard_products_flat = {}
         for product_name, details in config.PRODUCTS.items():
             if details.get('category') == "giftcard":
-                # Adiciona todos os sub-produtos (preços) do giftcard ao dicionário plano
                 for item_name, item_price in details['prices'].items():
-                    giftcard_products_flat[item_name] = item_price # Ex: {"R$50": 52.00}
+                    giftcard_products_flat[item_name] = item_price
 
         await self._handle_product_category_command(interaction, giftcard_products_flat, "giftcard", "Giftcards")
 
-    # Função unificada para lidar com comandos de categoria
     async def _handle_product_category_command(self, interaction: discord.Interaction, products_dict_flat: dict, category_filter: str, category_name: str):
         user_id = interaction.user.id
         print(f"[DEBUG] _handle_product_category_command iniciado para {user_id} com categoria '{category_filter}'.")
@@ -631,7 +587,6 @@ class Purchase(commands.Cog):
                             print(f"[DEBUG] Botão 'Iniciar Nova Compra' clicado por {interaction_button.user.name}.")
                             await self.bot.db.execute("UPDATE users SET cart_thread_id = NULL, cart_product_name = NULL, cart_quantity = NULL, cart_status = NULL, roblox_nickname = NULL WHERE user_id = $1", self.user_id)
                             
-                            # Redireciona para o comando original para iniciar nova compra
                             if self.current_category_filter == "robux":
                                 await self.bot.get_cog("Purchase").robux_command.callback(self.bot.get_cog("Purchase"), interaction_button)
                             elif self.current_category_filter == "jogos":
@@ -658,6 +613,7 @@ class Purchase(commands.Cog):
                 color=config.ROSE_COLOR
             )
             print(f"[DEBUG] Enviando menu de seleção de {category_name} para {interaction.user.name}.")
+            # AQUI: Products_dict_flat agora é o que ProductSelectView espera!
             await interaction.response.send_message(embed=embed, view=ProductSelectView(self.bot, products_dict_flat, category_name), ephemeral=True)
             print(f"[DEBUG] Mensagem de seleção de {category_name} enviada.")
 
