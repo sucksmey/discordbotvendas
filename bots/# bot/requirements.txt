@@ -1,0 +1,6 @@
+# bot/requirements.txt
+discord-py
+python-dotenv
+aiohttp
+asyncpg
+Flask # Para o futuro webhook do Mercado Pago e dashboard
