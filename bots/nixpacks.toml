@@ -1,0 +1,3 @@
+# bot/nixpacks.toml
+[packages]
+apt = ["postgresql-client-dev"] # Necessário para o asyncpg funcionar
