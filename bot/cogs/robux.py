@@ -1,37 +1,101 @@
 import discord
 from discord.ext import commands
-from discord import slash_command
+from discord import slash_command # Manter para outros comandos se necessário, mas não para /robux
 import logging
 import asyncio
-import datetime # Para timestamp e expiração
-import re # Para validar links
-import base64 # Para decodificar o QR Code
+import datetime
+import re
+import base64
 
 import config
 from utils.database import Database
 from utils.embeds import create_embed, create_error_embed, create_success_embed
-from cogs.common_listeners import CommonViews, ConfirmGamepassView # Importa views comuns
+from cogs.common_listeners import CommonViews, ConfirmGamepassView
 
 logger = logging.getLogger('discord_bot')
 
-# QR Code Base64 (substitua pelo seu QR Code real em Base64)
-# Use uma ferramenta online para converter sua imagem .png do QR Code em Base64 string
-# Exemplo de como seria: 'iVBORw0KGgoAAAANSUhEUgAAAQAAAAE... (muitos caracteres)'
-# Por enquanto, vou usar um placeholder. VOCÊ DEVE SUBSTITUIR ISSO.
-PIX_QR_CODE_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" # Placeholder: Imagem 1x1 pixel transparente
-# A imagem do QR Code deve ser anexada ou convertida para Base64 e colocada aqui.
-# Para evitar URLs muito longas, o ideal é que essa imagem seja servida de um CDN
-# ou o bot faça upload para o Discord e use o link gerado.
-# Por simplicidade inicial, usaremos um link direto ou base64 curto se possível.
-# Para o seu caso, como você forneceu a imagem, o ideal seria o bot fazer o upload programaticamente
-# para o Discord ou você hospedar essa imagem em algum lugar e usar a URL aqui.
-# Para esta primeira versão, usaremos um placeholder. A exibição real do QR code via base64
-# em embeds é limitada ou exige que o bot envie a imagem como arquivo.
-
-# Como alternativa, podemos ter a URL do QR Code em algum lugar acessível se você preferir hospedar.
-# Por agora, para simular a entrega, vamos enviar uma URL de uma imagem de QR Code genérica.
-# Você deve SUBISTITUIR esta URL pela URL do seu QR Code ou pela lógica de upload da imagem.
+# --- CONFIGURAÇÃO DO QR CODE E INFORMAÇÕES PIX ---
+# SUBSTITUA esta URL pela URL do seu QR Code REAL, hospedado em algum lugar (ex: Imgur).
+# Se você tiver a imagem em arquivo e quiser que o bot a envie, a lógica será diferente (File upload).
+# Por enquanto, usaremos uma URL de placeholder genérica para simular.
 PIX_QR_CODE_IMAGE_URL = "https://i.imgur.com/example_qrcode.png" # SUBSTITUA PELA URL DO SEU QR CODE REAL
+
+class RobuxPurchaseInitialView(discord.ui.View):
+    def __init__(self, bot: commands.Bot):
+        super().__init__(timeout=None) # View persistente
+        self.bot = bot
+        self.db: Database = bot.database
+
+    @discord.ui.button(label="Comprar Robux", style=discord.ButtonStyle.green, custom_id="start_robux_purchase_button")
+    async def start_robux_purchase_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Botão inicial para começar a compra de Robux."""
+        await interaction.response.defer(ephemeral=True) # Resposta ephemera, visível só para o usuário
+
+        # Loga a ação privada
+        private_log_channel = self.bot.get_channel(config.PRIVATE_ACTIONS_LOG_CHANNEL_ID)
+        if private_log_channel:
+            log_embed = create_embed(
+                "👁️ Ação Privada Registrada",
+                f"**Usuário:** {interaction.user.mention} (ID: `{interaction.user.id}`)\n"
+                f"**Ação:** Clicou no botão 'Comprar Robux'."
+            )
+            await private_log_channel.send(embed=log_embed)
+            logger.info(f"Usuário {interaction.user.name} ({interaction.user.id}) clicou no botão 'Comprar Robux'.")
+
+        # Verificar se o usuário já tem carrinhos ativos (múltiplos são permitidos, mas avisamos)
+        active_carts = await self.db.fetch(
+            "SELECT cart_id, thread_id, product_name, quantity_or_value FROM carts WHERE user_id = $1 AND cart_status NOT IN ('completed', 'cancelled', 'expired', 'closed_by_archive')",
+            interaction.user.id
+        )
+
+        if active_carts:
+            # Se já tem carrinhos ativos, lista e pergunta se quer iniciar novo
+            embed_existing = create_embed(
+                "🛒 Você já tem compras em andamento!",
+                "**Carrinhos Ativos:**\n" + 
+                "\n".join([f"- {cart['quantity_or_value']} de {cart['product_name']} [Link da Conversa](<#{cart['thread_id']}>)" for cart in active_carts]) +
+                "\n\nDeseja iniciar uma nova compra de Robux?"
+            )
+            class NewPurchaseDecisionView(discord.ui.View):
+                def __init__(self, bot_ref: commands.Bot, user: discord.Member, original_interaction: discord.Interaction):
+                    super().__init__(timeout=60) # Timeout curto para esta view de decisão
+                    self.bot_ref = bot_ref
+                    self.user = user
+                    self.original_interaction = original_interaction
+
+                async def on_timeout(self):
+                    # Tenta remover os botões se a interação expirar
+                    try:
+                        await self.original_interaction.edit_original_response(view=None)
+                    except discord.NotFound:
+                        pass # Mensagem já deletada ou não encontrada
+
+                @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green)
+                async def start_new_purchase(self, interaction_btn: discord.Interaction, button: discord.ui.Button):
+                    if interaction_btn.user.id != self.user.id:
+                        await interaction_btn.response.send_message(embed=create_error_embed("Este botão não é para você."), ephemeral=True)
+                        return
+                    await interaction_btn.response.defer(ephemeral=True)
+                    await self.original_interaction.edit_original_response(view=None) # Remove os botões da mensagem de decisão
+
+                    # Iniciar o fluxo principal para nova compra
+                    await self.bot_ref.get_cog("Robux")._start_robux_purchase_flow(interaction_btn)
+
+                @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.red)
+                async def cancel_new_purchase(self, interaction_btn: discord.Interaction, button: discord.ui.Button):
+                    if interaction_btn.user.id != self.user.id:
+                        await interaction_btn.response.send_message(embed=create_error_embed("Este botão não é para você."), ephemeral=True)
+                        return
+                    await interaction_btn.response.send_message(embed=create_embed("Compra Cancelada", "Você pode iniciar uma nova compra a qualquer momento."), ephemeral=True)
+                    await self.original_interaction.edit_original_response(view=None) # Remove os botões
+                    self.stop()
+            
+            # Enviar a mensagem com a pergunta para iniciar nova compra
+            await interaction.followup.send(embed=embed_existing, view=NewPurchaseDecisionView(self.bot, interaction.user, interaction), ephemeral=True)
+            return
+
+        # Se não houver carrinho ativo, inicia o fluxo de seleção de quantidade
+        await self._start_robux_purchase_flow(interaction)
 
 class SelectRobuxQuantityView(discord.ui.View):
     def __init__(self, bot: commands.Bot, user: discord.Member, original_interaction: discord.Interaction):
@@ -40,63 +104,63 @@ class SelectRobuxQuantityView(discord.ui.View):
         self.user = user
         self.db: Database = bot.database
         self.original_interaction = original_interaction # Guarda a interação original para editar ou responder efemeramente
+        self.message = None # Para armazenar a mensagem com a view do select
         self.add_item(self.create_select_menu())
 
     def create_select_menu(self):
         options = []
-        for name, data in config.PRODUCTS.items():
-            if data['type'] == 'robux':
-                for qty_str, price in data['prices'].items():
-                    options.append(
+        robux_data = config.PRODUCTS.get("Robux")
+        if robux_data:
+            for qty_str, price in robux_data['prices'].items():
+                options.append(
+                    discord.SelectOption(
+                        label=f"{robux_data['emoji']} {qty_str} - R${price:.2f}",
+                        value=f"Robux|{qty_str}|{price}" # Ex: "Robux|100 Robux|4.50"
+                    )
+                )
+            if "vip_prices" in robux_data:
+                for qty_str, price in robux_data['vip_prices'].items():
+                     options.append(
                         discord.SelectOption(
-                            label=f"{data['emoji']} {qty_str} - R${price:.2f}",
-                            value=f"{name}|{qty_str}|{price}" # Ex: "Robux|100 Robux|4.50"
+                            label=f"{robux_data['emoji']} {qty_str} VIP - R${price:.2f}",
+                            value=f"Robux|{qty_str}|{price}",
+                            description="Preço especial para membros VIP!"
                         )
                     )
-                # Adicionar opções VIP se existirem
-                if "vip_prices" in data:
-                    for qty_str, price in data['vip_prices'].items():
-                         options.append(
-                            discord.SelectOption(
-                                label=f"{data['emoji']} {qty_str} VIP - R${price:.2f}",
-                                value=f"{name}|{qty_str}|{price}",
-                                description="Preço especial para membros VIP!"
-                            )
-                        )
         
-        # O limite do Discord para SelectOption é 25. Se tivermos mais, precisamos paginar ou agrupar.
-        # Por simplicidade, assumimos que não excederemos 25 para Robux inicialmente.
         return discord.ui.Select(
             placeholder="Selecione a quantidade de Robux",
-            options=options,
+            options=options[:25], # Limita a 25 opções, limite do Discord
             custom_id="select_robux_quantity"
         )
 
     async def on_timeout(self):
         # A mensagem original deve ser editada para remover a view
         try:
-            if self.original_interaction.response.is_done():
+            if self.message:
+                await self.message.edit(view=None)
+            elif self.original_interaction.response.is_done(): # Fallback para a interação original
                 await self.original_interaction.edit_original_response(view=None)
-            else: # Se a resposta ainda não foi feita (ex: interação ephemera inicial)
-                await self.original_interaction.edit_original_response(view=None)
-        except discord.NotFound: # Mensagem já deletada
+        except discord.NotFound:
             pass
         except Exception as e:
             logger.error(f"Erro ao remover view em timeout de SelectRobuxQuantityView: {e}")
 
 class RobloxNicknameModal(discord.ui.Modal):
-    def __init__(self, bot: commands.Bot, selected_product_name: str, selected_quantity_value: str, selected_price: float, original_interaction: discord.Interaction):
+    def __init__(self, bot: commands.Bot, selected_product_name: str, selected_quantity_value: str, selected_price: float, original_interaction_message: discord.Message):
         super().__init__(title="Seu Nickname no Roblox")
         self.bot = bot
-        self.db: Database = bot.database
+        self.db: Database = bot.db # Acessa o atributo db do bot
         self.selected_product_name = selected_product_name
         self.selected_quantity_value = selected_quantity_value
         self.selected_price = selected_price
-        self.original_interaction = original_interaction
-
-        self.add_item(discord.ui.InputText(label="Nickname Roblox", placeholder="Seu nome de usuário no Roblox", style=discord.InputTextStyle.short))
+        self.original_interaction_message = original_interaction_message # Mensagem que contém a Select View
+        
+        self.add_item(discord.ui.InputText(label="Nickname Roblox", placeholder="Seu nome de usuário no Roblox", style=discord.InputTextStyle.short, required=True))
 
     async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True) # Deferir para não expirar
+
         roblox_nickname = self.children[0].value.strip()
 
         # Primeiro, garantir que o usuário existe no DB
@@ -110,21 +174,21 @@ class RobloxNicknameModal(discord.ui.Modal):
 
         # Criar o carrinho no DB
         try:
-            cart_id = await self.db.fetchrow(
+            cart_id_row = await self.db.fetchrow(
                 """
                 INSERT INTO carts (user_id, product_type, product_name, quantity_or_value, price, roblox_nickname, cart_status)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING cart_id
                 """,
                 interaction.user.id, "Robux", self.selected_product_name, self.selected_quantity_value, 
-                self.selected_price, roblox_nickname, 'awaiting_payment_method_selection'
+                self.selected_price, roblox_nickname, 'initiated' # Status inicial do carrinho
             )
-            cart_id = cart_id['cart_id']
+            cart_id = cart_id_row['cart_id']
 
             # Criar a thread privada
             compra_channel = self.bot.get_channel(config.COMPRE_AQUI_CHANNEL_ID)
             if not compra_channel:
-                await interaction.response.send_message(embed=create_error_embed("Erro: Canal de compras não encontrado. Contate um admin."), ephemeral=True)
+                await interaction.followup.send(embed=create_error_embed("Erro: Canal de compras não encontrado. Contate um admin."), ephemeral=True)
                 logger.error(f"Canal COMPRE_AQUI_CHANNEL_ID ({config.COMPRE_AQUI_CHANNEL_ID}) não encontrado.")
                 return
 
@@ -147,32 +211,21 @@ class RobloxNicknameModal(discord.ui.Modal):
                     except discord.Forbidden:
                         logger.warning(f"Não foi possível adicionar admin {member.name} à thread {new_thread.id}. Permissão negada.")
             
-            # Atualizar o carrinho com o thread_id
+            # Atualizar o carrinho com o thread_id e o status para aguardando método de pagamento
             await self.db.execute("UPDATE carts SET thread_id = $1, cart_status = $2, updated_at = NOW() WHERE cart_id = $3",
                                   new_thread.id, 'awaiting_payment_method_selection', cart_id)
             
-            # Editar a mensagem original do comando para redirecionar
+            # Editar a mensagem original da seleção de Robux para redirecionar
             try:
-                if self.original_interaction.response.is_done():
-                    await self.original_interaction.edit_original_response(
+                if self.original_interaction_message:
+                    await self.original_interaction_message.edit(
                         embed=create_embed(
                             "🛒 Seu Carrinho Foi Criado!",
                             f"Seu carrinho para **{self.selected_quantity_value}** de {self.selected_product_name} foi criado! "
                             f"Por favor, continue a conversa em {new_thread.mention}."
                         ),
-                        view=None # Remove os botões da mensagem original
+                        view=None # Remove os botões da mensagem original de seleção
                     )
-                else:
-                     await self.original_interaction.response.edit_message(
-                        embed=create_embed(
-                            "🛒 Seu Carrinho Foi Criado!",
-                            f"Seu carrinho para **{self.selected_quantity_value}** de {self.selected_product_name} foi criado! "
-                            f"Por favor, continue a conversa em {new_thread.mention}."
-                        ),
-                        view=None
-                    )
-            except discord.NotFound:
-                logger.warning("Mensagem original da interação não encontrada ao tentar editar.")
             except Exception as e:
                 logger.error(f"Erro ao editar mensagem original após criar carrinho: {e}")
 
@@ -184,7 +237,7 @@ class RobloxNicknameModal(discord.ui.Modal):
                 f"Seu nickname no Roblox é: `{roblox_nickname}`\n\n"
                 f"Por favor, selecione seu método de pagamento abaixo. Se precisar de ajuda, clique em 'Pegar Ticket'."
             )
-            # Adicionar botões de método de pagamento
+            # Adicionar botões de método de pagamento (herda de CommonViews para o botão Pegar Ticket)
             payment_options_view = PaymentMethodView(self.bot, cart_id)
             await new_thread.send(embed=initial_thread_embed, view=payment_options_view)
             
@@ -202,35 +255,46 @@ class RobloxNicknameModal(discord.ui.Modal):
                 )
                 await carrinho_em_andamento_channel.send(embed=log_embed)
             
+            await interaction.followup.send(embed=create_success_embed("Carrinho Criado!", f"Continue sua compra em {new_thread.mention}."), ephemeral=True)
             logger.info(f"Carrinho {cart_id} criado para {interaction.user.name} ({self.selected_quantity_value} de {self.selected_product_name}). Thread: {new_thread.id}")
 
         except Exception as e:
             logger.error(f"Erro ao criar carrinho ou thread para {interaction.user.name}: {e}", exc_info=True)
-            await interaction.response.send_message(embed=create_error_embed("Ocorreu um erro ao criar seu carrinho. Por favor, tente novamente ou contate um admin."), ephemeral=True)
+            await interaction.followup.send(embed=create_error_embed("Ocorreu um erro ao criar seu carrinho. Por favor, tente novamente ou contate um admin."), ephemeral=True)
 
 
-class PaymentMethodView(CommonViews): # Herda de CommonViews para incluir o botão "Pegar Ticket" e timeout
+class PaymentMethodView(CommonViews):
     def __init__(self, bot: commands.Bot, cart_id: int):
-        # Passa o user_id para CommonViews
-        # cart_id é necessário para buscar o user_id e outros detalhes do carrinho
         self.bot = bot
-        self.db: Database = bot.database
+        self.db: Database = bot.db # Acessa o atributo db do bot
         self.cart_id = cart_id
-        # Recuperar user_id para a CommonViews
-        asyncio.create_task(self._set_user_id_from_cart()) # Executa de forma assíncrona
+        self._user_id = None # Para ser preenchido async
+        
+        # O self._set_user_id_from_cart precisa ser chamado e awaited para inicializar CommonViews corretamente
+        # Como não podemos usar await no __init__ diretamente, faremos isso em um setup_hook_for_view
+        super().__init__(bot, 0) # Inicializa CommonViews temporariamente com user_id 0
+        
+        # Adiciona os botões de método de pagamento
+        self.add_item(discord.ui.Button(label="💳 PIX", style=discord.ButtonStyle.green, custom_id="payment_method_pix"))
+        self.add_item(discord.ui.Button(label="📄 Boleto (Em Breve)", style=discord.ButtonStyle.grey, custom_id="payment_method_boleto", disabled=True))
+        self.add_item(discord.ui.Button(label="💳 Cartão de Crédito (Em Breve)", style=discord.ButtonStyle.grey, custom_id="payment_method_credit_card", disabled=True))
 
-    async def _set_user_id_from_cart(self):
-        cart = await self.db.fetchrow("SELECT user_id FROM carts WHERE cart_id = $1", self.cart_id)
-        if cart:
-            super().__init__(self.bot, cart['user_id']) # Inicializa CommonViews com o user_id
-        else:
-            logger.error(f"Carrinho {self.cart_id} não encontrado ao inicializar PaymentMethodView.")
-            super().__init__(self.bot, 0) # Inicializa com user_id 0 para evitar erro, mas é um estado de erro
+
+    async def on_timeout(self):
+        # A lógica de timeout da CommonViews já lida com o user_id e atualização do carrinho
+        await super().on_timeout()
+        if self.message:
+            try:
+                await self.message.edit(view=None)
+            except discord.HTTPException:
+                pass
+
 
     @discord.ui.button(label="💳 PIX", style=discord.ButtonStyle.green, custom_id="payment_method_pix")
     async def pix_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer() # Acknowledge the interaction
-
+        
+        # Revalidar o carrinho e o usuário para segurança
         cart = await self.db.fetchrow("SELECT * FROM carts WHERE cart_id = $1 AND user_id = $2", 
                                       self.cart_id, interaction.user.id)
         
@@ -247,113 +311,72 @@ class PaymentMethodView(CommonViews): # Herda de CommonViews para incluir o bot�
             "💰 Pagamento via PIX",
             f"Por favor, faça um PIX no valor de **R${cart['price']:.2f}** para:\n"
             f"**Chave PIX:** `{config.PIX_KEY_MANUAL}`\n"
-            f"**Nome:** `{config.PIX_RECEIVER_NAME}`\n\n" # Será adicionado no config.py
+            f"**Nome:** `{config.PIX_RECEIVER_NAME}`\n\n"
             f"Escaneie o QR Code abaixo ou utilize a chave PIX Copia e Cola. "
             f"**Após o pagamento, envie o comprovante neste chat para verificação.**"
         )
-        # pix_embed.set_image(url=PIX_QR_CODE_IMAGE_URL) # Usar URL da imagem do QR Code
-        # Como o Discord não suporta base64 diretamente em embeds para imagem,
-        # e para evitar ter que lidar com uploads de arquivo por enquanto,
-        # vou apenas exibir a chave e o nome. Se o QR code for essencial e não houver URL,
-        # teremos que enviar a imagem do QR Code como anexo separado.
-        # Por enquanto, focaremos na chave PIX e nome.
+        
+        # Anexa o QR Code. Isso requer que o arquivo do QR Code esteja acessível pelo bot.
+        # Você deve ter o arquivo do QR Code (ex: "qrcode_pix.png") na pasta "bot/assets/"
+        # e configurar para o Railway também ter acesso a ele.
+        # Para fins de deploy no Railway, o ideal é que esse arquivo esteja no seu repo.
+        qr_file_path = "assets/qrcode_pix.png" # Crie uma pasta 'assets' e coloque o QR Code lá
 
-        # Para incluir o QR Code, você pode adicionar um campo com uma URL
-        # ou, se o QR Code for uma imagem que você mesmo hospeda:
-        # pix_embed.set_image(url="URL_DO_SEU_QR_CODE_HOSPEDADO")
-        # Ou, se for enviar como anexo:
-        # await interaction.channel.send(file=discord.File("caminho/para/seu/qrcode.png"))
+        try:
+            # Envia a imagem do QR Code como um arquivo anexo
+            pix_embed.set_image(url="attachment://qrcode_pix.png") # Define a imagem do embed para o anexo
+            await interaction.followup.send(embed=pix_embed, file=discord.File(qr_file_path, filename="qrcode_pix.png"))
+        except FileNotFoundError:
+            logger.error(f"Arquivo QR Code não encontrado em {qr_file_path}. Enviando apenas texto.")
+            await interaction.followup.send(embed=pix_embed)
+        except Exception as e:
+            logger.error(f"Erro ao enviar QR Code: {e}", exc_info=True)
+            await interaction.followup.send(embed=pix_embed)
 
-        await interaction.followup.send(embed=pix_embed)
-        # Remove os botões de método de pagamento após a seleção
-        await interaction.message.edit(view=CommonViews(self.bot, interaction.user.id)) # Mantém apenas o botão "Pegar Ticket"
+
+        # Remove os botões de método de pagamento após a seleção, mantendo apenas o "Pegar Ticket"
+        # Usamos uma instância de CommonViews para manter apenas o botão "Pegar Ticket"
+        # Garante que a mensagem que contém a view seja editada.
+        if interaction.message:
+            await interaction.message.edit(view=CommonViews(self.bot, interaction.user.id))
 
         logger.info(f"Carrinho {self.cart_id} de {interaction.user.name}: Selecionado PIX manual. Aguardando comprovante.")
 
-    @discord.ui.button(label="📄 Boleto (Em Breve)", style=discord.ButtonStyle.grey, disabled=True)
+    # Os botões de Boleto e Cartão de Crédito foram movidos para dentro da classe PaymentMethodView,
+    # para que possam ser usados em discord.ui.Button
+    @discord.ui.button(label="📄 Boleto (Em Breve)", style=discord.ButtonStyle.grey, custom_id="payment_method_boleto", disabled=True)
     async def boleto_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(embed=create_embed("Boleto", "O método de pagamento por Boleto estará disponível em breve!"), ephemeral=True)
 
-    @discord.ui.button(label="💳 Cartão de Crédito (Em Breve)", style=discord.ButtonStyle.grey, disabled=True)
+    @discord.ui.button(label="💳 Cartão de Crédito (Em Breve)", style=discord.ButtonStyle.grey, custom_id="payment_method_credit_card", disabled=True)
     async def credit_card_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(embed=create_embed("Cartão de Crédito", "O método de pagamento por Cartão de Crédito estará disponível em breve!"), ephemeral=True)
-
 
 class Robux(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.db: Database = bot.database
+        self.db: Database = bot.db # Acessa o atributo db do bot
 
-    @slash_command(name="robux", description="Inicia o processo de compra de Robux.", guild_ids=[config.GUILD_ID])
-    async def robux_command(self, ctx: discord.ApplicationContext):
-        # Verifica se o comando foi usado no canal correto
-        if ctx.channel.id != config.COMPRE_AQUI_CHANNEL_ID:
-            await ctx.respond(embed=create_error_embed(f"Este comando só pode ser usado no canal {self.bot.get_channel(config.COMPRE_AQUI_CHANNEL_ID).mention}."), ephemeral=True)
+    # Removemos o @slash_command("robux") daqui. O fluxo será iniciado por um botão.
+    # Adicionamos um comando de admin para enviar a mensagem inicial de Robux.
+    @slash_command(name="setup_robux_button", description="Envia a mensagem com o botão 'Comprar Robux'.", guild_ids=[config.GUILD_ID])
+    @commands.has_role(config.ADMIN_ROLE_ID)
+    async def setup_robux_button(self, ctx: discord.ApplicationContext):
+        # Verifica se o usuário tem o cargo de administrador
+        if not discord.utils.get(ctx.author.roles, id=config.ADMIN_ROLE_ID):
+            await ctx.respond(embed=create_error_embed("Você não tem permissão para usar este comando."), ephemeral=True)
             return
 
-        # Loga a ação privada
-        private_log_channel = self.bot.get_channel(config.PRIVATE_ACTIONS_LOG_CHANNEL_ID)
-        if private_log_channel:
-            log_embed = create_embed(
-                "👁️ Ação Privada Registrada",
-                f"**Usuário:** {ctx.author.mention} (ID: `{ctx.author.id}`)\n"
-                f"**Ação:** Iniciou o comando `/robux`."
-            )
-            await private_log_channel.send(embed=log_embed)
-            logger.info(f"Usuário {ctx.author.name} ({ctx.author.id}) iniciou o comando /robux.")
-
-        # Verificar se o usuário já tem um carrinho em andamento ATIVO (não expirado, completo ou cancelado)
-        # Consideramos que múltiplos carrinhos são permitidos, então esta verificação é mais sobre um "carrinho principal"
-        # Ou para redirecionar para uma thread existente se o usuário tentar criar outra no mesmo canal
-        active_carts = await self.db.fetch(
-            "SELECT cart_id, thread_id FROM carts WHERE user_id = $1 AND cart_status NOT IN ('completed', 'cancelled', 'expired', 'closed_by_archive')",
-            ctx.author.id
+        embed = create_embed(
+            "💎 Central de Robux",
+            "Clique no botão abaixo para iniciar sua compra de Robux."
         )
-
-        if active_carts:
-            # Se já tem carrinhos ativos, lista e pergunta se quer iniciar novo
-            # Por simplicidade da "resposta curta", vamos direto para "Deseja comprar mais?"
-            # ou lista os carrinhos ativos e pergunta qual quer acessar/se quer um novo.
-            # Baseado na sua resposta de "Múltiplos carrinhos podem ser gerados simultaneamente sem um afetar o outro",
-            # não precisamos de um botão "acessar carrinho", apenas "iniciar nova compra".
-
-            embed_existing = create_embed(
-                "🛒 Você já tem um ou mais carrinhos em andamento!",
-                "Deseja iniciar uma nova compra de Robux?"
-            )
-            class NewPurchaseView(discord.ui.View):
-                def __init__(self, bot_ref: commands.Bot, user: discord.Member, original_ctx: discord.ApplicationContext):
-                    super().__init__(timeout=60) # Timeout curto para esta view de decisão
-                    self.bot_ref = bot_ref
-                    self.user = user
-                    self.original_ctx = original_ctx
-
-                @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green)
-                async def start_new_purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if interaction.user.id != self.user.id:
-                        await interaction.response.send_message(embed=create_error_embed("Este botão não é para você."), ephemeral=True)
-                        return
-                    await interaction.response.defer(ephemeral=True)
-                    await self.original_ctx.edit_original_response(view=None) # Remove os botões
-
-                    # Iniciar o fluxo principal para nova compra
-                    await self.bot_ref.get_cog("Robux")._start_robux_purchase_flow(interaction)
-
-                @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.red)
-                async def cancel_new_purchase(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if interaction.user.id != self.user.id:
-                        await interaction.response.send_message(embed=create_error_embed("Este botão não é para você."), ephemeral=True)
-                        return
-                    await interaction.response.send_message(embed=create_embed("Compra Cancelada", "Você pode iniciar uma nova compra a qualquer momento."), ephemeral=True)
-                    await self.original_ctx.edit_original_response(view=None) # Remove os botões
-                    self.stop()
-            
-            # Enviar a mensagem para iniciar nova compra ou não
-            await ctx.respond(embed=embed_existing, view=NewPurchaseView(self.bot, ctx.author, ctx), ephemeral=True)
-            return
-
-        # Se não houver carrinho ativo, inicia o fluxo de seleção de quantidade
-        await self._start_robux_purchase_flow(ctx)
+        view = RobuxPurchaseInitialView(self.bot)
+        
+        message = await ctx.channel.send(embed=embed, view=view)
+        view.message = message # Associa a mensagem à view para persistência
+        await ctx.respond(embed=create_success_embed("Mensagem de Robux configurada!", "O botão 'Comprar Robux' foi enviado."), ephemeral=True)
+        logger.info(f"Comando /setup_robux_button usado por {ctx.author.name} ({ctx.author.id}) no canal {ctx.channel.name} ({ctx.channel.id}).")
 
     async def _start_robux_purchase_flow(self, interaction: discord.Interaction):
         """Inicia a seleção de quantidade de Robux."""
@@ -361,35 +384,44 @@ class Robux(commands.Cog):
             "💎 Central de Robux",
             "Selecione a quantidade de Robux que deseja comprar:"
         )
-        # Crie a view com o select menu
         view = SelectRobuxQuantityView(self.bot, interaction.user, interaction)
         
-        # Envie a mensagem original (ou edite a resposta se já deferida)
+        # Envia a mensagem ephemera com o select menu
+        # Se a interação já foi respondida (deferida), use followup.send
         if interaction.response.is_done():
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        else:
-            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            response_message = await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else: # Caso a interação ainda não tenha sido respondida
+            response_message = await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        
+        # Atribui a mensagem para a view para que ela possa ser editada/removida no timeout
+        view.message = response_message
+
 
     @commands.Cog.listener("on_interaction")
     async def handle_robux_selection(self, interaction: discord.Interaction):
         """Lida com a seleção de quantidade de Robux pelo SelectMenu."""
         if interaction.type == discord.InteractionType.component and interaction.data['custom_id'] == "select_robux_quantity":
-            await interaction.response.defer(ephemeral=True) # Acknowledge the interaction
+            # Deferir a resposta para ter tempo de processar
+            await interaction.response.defer(ephemeral=True) 
             
             selected_value = interaction.data['values'][0] # Pega o valor selecionado
             product_name, quantity_value_str, price_str = selected_value.split('|')
             price = float(price_str)
 
-            # Remover a view da mensagem original para não permitir mais seleções
+            # Remover a view da mensagem original (ephemera) para não permitir mais seleções
             try:
-                # Tenta editar a mensagem que contém o select menu (a mensagem ephemera)
-                await interaction.message.edit(view=None)
+                await interaction.message.edit(view=None) # Edita a mensagem da qual a interação veio
             except Exception as e:
-                logger.error(f"Erro ao remover view da seleção de Robux: {e}")
+                logger.error(f"Erro ao remover view da seleção de Robux: {e}", exc_info=True)
 
             # Abrir o modal para pedir o nickname Roblox
-            modal = RobloxNicknameModal(self.bot, product_name, quantity_value_str, price, interaction)
+            modal = RobloxNicknameModal(self.bot, product_name, quantity_value_str, price, interaction.message)
+            # Envia o modal como uma followup da interação original.
+            # interaction.response.send_modal não funciona após deferimento ephemera,
+            # é preciso usar interaction.followup.send_modal
             await interaction.followup.send_modal(modal)
 
 async def setup(bot):
     await bot.add_cog(Robux(bot))
+    # Adicionar a view persistente para o botão de compra de Robux
+    bot.add_view(RobuxPurchaseInitialView(bot))
