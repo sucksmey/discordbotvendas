@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from pycord.ext import commands
 # from discord.commands import slash_command # REMOVIDO: Importação direta não funciona
 import logging
 import asyncio
