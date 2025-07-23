@@ -6,38 +6,38 @@ ADMIN_ROLE_ID = 1379126175317622965
 VIP_ROLE_ID = 1070823913308827678
 CLIENT_ROLE_ID = 1380201405691727923
 COMPRE_AQUI_CHANNEL_ID = 1380180725369798708
-CATEGORY_VENDAS_ID = 1382399986725163140 # Categoria para threads de vendas
-CATEGORY_ENTREGUES_ID = 1392174310453411961 # Categoria para threads de entregues (para organização)
-LOGS_COMPRAS_CHANNEL_ID = 1382340441579720846 # Logs detalhados de compras
-TRANSCRIPT_CHANNEL_ID = 1382342395068289156 # Para transcrições de threads
-REVIEW_CHANNEL_ID = 1380180935302975620 # Canal para avaliações dos clientes
-ROBUX_DELIVERY_USER_ID = 314200274933907456 # ID de um usuário para marcar entregas (se aplicável)
-PUBLIC_LOGS_CHANNEL_ID = 1394349518933463193 # Logs de compras aprovadas para visibilidade pública
-CARRINHO_EM_ANDAMENTO_CHANNEL_ID = 1386049296238903336 # Canal para notificar admins sobre novos carrinhos/tickets
-PRIVATE_ACTIONS_LOG_CHANNEL_ID = 1394112959436820520 # Logs de ações privadas (histórico, consultar preços)
+CATEGORY_VENDAS_ID = 1382399986725163140 
+CATEGORY_ENTREGUES_ID = 1392174310453411961 
+LOGS_COMPRAS_CHANNEL_ID = 1382340441579720846 
+TRANSCRIPT_CHANNEL_ID = 1382342395068289156 
+REVIEW_CHANNEL_ID = 1380180935302975620 
+ROBUX_DELIVERY_USER_ID = 314200274933907456 
+PUBLIC_LOGS_CHANNEL_ID = 1394349518933463193 
+CARRINHO_EM_ANDAMENTO_CHANNEL_ID = 1386049296238903336 
+PRIVATE_ACTIONS_LOG_CHANNEL_ID = 1394112959436820520 
 
 # --- IDs de Fidelidade e Sorteio ---
 LOYALTY_NOTIFICATION_CHANNEL_ID = 1380180609653018735
-GIVEAWAY_CHANNEL_ID = 0 # Preencha com o ID do canal principal de sorteios (se houver, 0 por enquanto)
+GIVEAWAY_CHANNEL_ID = 0 
 LOYALTY_ROLE_10 = 1394109025246773340
 LOYALTY_ROLE_50 = 1394109339316392047
 LOYALTY_ROLE_100 = 1394113545280557067
 
 # --- Configurações de Pagamento ---
-PIX_KEY_MANUAL = "israbuyshop@gmail.com" # Chave PIX manual de fallback (remover após integrar MP)
-VIP_PRICE = 6.00 # Não usado diretamente com a nova estrutura de PRODUCTS
+PIX_KEY_MANUAL = "israbuyshop@gmail.com" 
+PIX_RECEIVER_NAME = "Luiz Carlos Maximo da Silva Rodrigues" # NOVO: Nome do recebedor PIX
+VIP_PRICE = 6.00 
 
 # --- Cores dos embeds (TODAS ROSAS, conforme solicitado) ---
-EMBED_COLOR = 0xFFC0CB # Cor rosa clara (Pink) para todas as embeds
+EMBED_COLOR = 0xFFC0CB 
 
 # --- Produtos e Preços (Serão carregados do DB, mas mantidos aqui para referência ou inicialização) ---
-# O bot dará preferência aos dados do DB se estiverem lá.
 PRODUCTS = {
     "Robux": {
         "emoji": "💎",
-        "type": "robux",
+        "type": "robux", 
         "prices": { "100 Robux": 4.50, "200 Robux": 8.10, "300 Robux": 12.70, "400 Robux": 17.60, "500 Robux": 21.50, "600 Robux": 25.40, "700 Robux": 29.30, "800 Robux": 33.20, "900 Robux": 37.10, "1000 Robux": 41.00 },
-        "vip_prices": { "1000 Robux": 36.90 }
+        "vip_prices": { "1000 Robux": 36.90 } 
     },
     "Valorant": {"emoji": "💢", "type": "game", "prices": {"400 VP": 19.00, "475 VP": 21.90, "505 VP": 23.00, "815 VP": 35.00, "1000 VP": 41.90, "1305 VP": 53.00, "1700 VP": 67.00, "1810 VP": 73.00, "2050 VP": 78.90, "2175 VP": 85.90, "2205 VP": 87.00, "2720 VP": 103.00, "3085 VP": 116.00, "3225 VP": 123.00, "3650 VP": 135.90, "4025 VP": 153.00, "4450 VP": 163.00}},
     "League of Legends": {"emoji": "💥", "type": "game", "prices": {"485 RP": 19.00, "575 RP": 21.90, "610 RP": 23.00, "1020 RP": 35.00, "1380 RP": 44.90, "1650 RP": 53.00, "1865 RP": 60.90, "2125 RP": 67.00, "2260 RP": 73.00, "2670 RP": 85.00, "2800 RP": 86.90, "3355 RP": 103.00, "3805 RP": 116.00, "4500 RP": 135.90, "5005 RP": 153.00, "5445 RP": 163.00, "5795 RP": 173.00, "6500 RP": 192.90, "6710 RP": 203.00, "11240 RP": 323.00, "13500 RP": 382.90}},
@@ -55,13 +55,12 @@ PRODUCTS = {
 }
 
 # --- Configurações do bot ---
-BOT_PREFIX = "!" # Prefixo para comandos tradicionais (se for usar)
-COMMAND_SYNC_GLOBAL = True # Sincronizar comandos de barra globalmente (Defina como False para testes locais rápidos)
+BOT_PREFIX = "!" 
+COMMAND_SYNC_GLOBAL = True 
 
 # Tempo de expiração do carrinho em minutos (ex: 60 minutos)
 CART_EXPIRATION_MINUTES = 60
 
 # --- Configurações de Mercado Pago (preencher quando integrar) ---
-# Os valores aqui serão substituídos pelas variáveis de ambiente do Railway
 MERCADO_PAGO_ACCESS_TOKEN = os.getenv("MERCADO_PAGO_ACCESS_TOKEN", "SEU_MERCADO_PAGO_ACCESS_TOKEN_AQUI")
 MERCADO_PAGO_WEBHOOK_URL = os.getenv("MERCADO_PAGO_WEBHOOK_URL", "SUA_URL_WEBHOOK_MERCADO_PAGO_AQUI")
