@@ -1,4 +1,4 @@
-Pycord==2.4.1 # MUDEI DE discord.py PARA PYCORD
+py-cord==2.4.1 # CORRIGIDO: Alterado de Pycord para py-cord
 asyncpg
 python-dotenv
 aiohttp
