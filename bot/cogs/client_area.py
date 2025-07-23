@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord import slash_command # Importação CORRETA para slash commands
+from discord.commands import slash_command # CORREÇÃO: Importa de discord.commands
 import logging
 import config
 from utils.database import Database
@@ -86,9 +86,8 @@ class ClientArea(commands.Cog):
         )
         view = ClientAreaView(self.bot)
         
-        # Envia a mensagem para o canal atual e armazena a referência para a view persistente
         message = await ctx.channel.send(embed=embed, view=view)
-        view.message = message # Associa a mensagem à view para manipulação futura (ex: timeout)
+        view.message = message 
         
         await ctx.respond(embed=create_success_embed("Área do cliente configurada!", "A mensagem com o botão foi enviada."), ephemeral=True)
         logger.info(f"Comando /setup_area_cliente usado por {ctx.author.name} ({ctx.author.id}) no canal {ctx.channel.name} ({ctx.channel.id}).")
@@ -96,6 +95,4 @@ class ClientArea(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(ClientArea(bot))
-    # É fundamental que a view seja adicionada ao bot no setup para persistência.
-    # Isso permite que o bot saiba qual View usar para interações com botões que já existem.
     bot.add_view(ClientAreaView(bot))
