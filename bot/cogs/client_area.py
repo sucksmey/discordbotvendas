@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.commands import slash_command # CORREÇÃO: Importa de discord.commands
+# from discord.commands import slash_command # REMOVIDO: Importação direta não funciona
 import logging
 import config
 from utils.database import Database
@@ -72,7 +72,7 @@ class ClientArea(commands.Cog):
         self.db: Database = bot.database
 
     # Comando para enviar a mensagem da área do cliente (para admins)
-    @slash_command(name="setup_area_cliente", description="Configura a mensagem da área do cliente com o botão.", guild_ids=[config.GUILD_ID])
+    @commands.slash_command(name="setup_area_cliente", description="Configura a mensagem da área do cliente com o botão.", guild_ids=[config.GUILD_ID]) # CORREÇÃO: Usando commands.slash_command
     @commands.has_role(config.ADMIN_ROLE_ID)
     async def setup_client_area(self, ctx: discord.ApplicationContext):
         # Primeiro, verifica se o usuário tem o cargo de administrador
