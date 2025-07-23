@@ -1,5 +1,5 @@
-discord.py
+discord.py==2.3.2 # Especifica uma versão mais recente e estável
 asyncpg
 python-dotenv
-aiohttp # Necessário para requisições HTTP (Mercado Pago, e futuramente Roblox)
-Flask # Para o webhook do Mercado Pago (servidor web mínimo)
+aiohttp
+Flask
