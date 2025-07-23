@@ -1,0 +1,5 @@
+discord.py
+asyncpg
+python-dotenv
+aiohttp # Necessário para requisições HTTP (Mercado Pago, e futuramente Roblox)
+Flask # Para o webhook do Mercado Pago (servidor web mínimo)
