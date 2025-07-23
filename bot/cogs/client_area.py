@@ -1,9 +1,10 @@
 import discord
 from discord.ext import commands
+from discord import slash_command # Importação CORRETA para slash commands
 import logging
 import config
 from utils.database import Database
-from utils.embeds import create_embed, create_error_embed
+from utils.embeds import create_embed, create_error_embed, create_success_embed
 
 logger = logging.getLogger('discord_bot')
 
@@ -32,7 +33,6 @@ class ClientAreaView(discord.ui.View):
             logger.info(f"Usuário {interaction.user.name} ({user_id}) consultou o histórico de compras.")
 
         # Buscar compras no banco de dados
-        # O username é puxado do objeto user do discord, pois o histórico é por user_id
         purchases = await self.db.fetch(
             "SELECT product_name, quantity_or_value, total_price, created_at FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10",
             user_id
@@ -61,36 +61,41 @@ class ClientAreaView(discord.ui.View):
                     inline=False
                 )
         
-        # O limite de 25 campos é para embeds. Usamos um campo por compra para o histórico.
-        # Se houver muitas compras, podemos paginar ou resumir.
-        if len(purchases) >= 10: # Se houver mais de 10, podemos adicionar uma nota
+        if len(purchases) >= 10: 
              embed.set_footer(text="Mostrando as 10 últimas compras. Para ver mais, contacte um admin.")
 
-        await interaction.followup.send(embed=embed, ephemeral=True) # Envia a resposta privada
+        await interaction.followup.send(embed=embed, ephemeral=True) 
 
 class ClientArea(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db: Database = bot.database
 
-    # Opcional: Comando para enviar a mensagem da área do cliente (para admins)
-    @commands.slash_command(name="setup_area_cliente", description="Configura a mensagem da área do cliente com o botão.", guild_ids=[config.GUILD_ID])
+    # Comando para enviar a mensagem da área do cliente (para admins)
+    @slash_command(name="setup_area_cliente", description="Configura a mensagem da área do cliente com o botão.", guild_ids=[config.GUILD_ID])
     @commands.has_role(config.ADMIN_ROLE_ID)
     async def setup_client_area(self, ctx: discord.ApplicationContext):
+        # Primeiro, verifica se o usuário tem o cargo de administrador
+        if not discord.utils.get(ctx.author.roles, id=config.ADMIN_ROLE_ID):
+            await ctx.respond(embed=create_error_embed("Você não tem permissão para usar este comando."), ephemeral=True)
+            return
+
         embed = create_embed(
             "👤 Área do Cliente",
             "Clique no botão abaixo para consultar seu histórico de compras."
         )
-        # Instancia a view e a envia com a mensagem
         view = ClientAreaView(self.bot)
-        message = await ctx.send(embed=embed, view=view)
-        view.message = message # Armazena a mensagem para a view persistente
+        
+        # Envia a mensagem para o canal atual e armazena a referência para a view persistente
+        message = await ctx.channel.send(embed=embed, view=view)
+        view.message = message # Associa a mensagem à view para manipulação futura (ex: timeout)
+        
         await ctx.respond(embed=create_success_embed("Área do cliente configurada!", "A mensagem com o botão foi enviada."), ephemeral=True)
+        logger.info(f"Comando /setup_area_cliente usado por {ctx.author.name} ({ctx.author.id}) no canal {ctx.channel.name} ({ctx.channel.id}).")
 
 
 async def setup(bot):
     await bot.add_cog(ClientArea(bot))
-    # Para garantir que a view persista entre reinícios do bot
-    # É importante adicionar a view aqui. Se o bot reiniciar e a mensagem já existe,
-    # a view será recarregada e os botões funcionarão.
+    # É fundamental que a view seja adicionada ao bot no setup para persistência.
+    # Isso permite que o bot saiba qual View usar para interações com botões que já existem.
     bot.add_view(ClientAreaView(bot))
