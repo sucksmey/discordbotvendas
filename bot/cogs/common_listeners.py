@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from pycord.ext import commands
 import logging
 import asyncio
 import re # Para expressões regulares
