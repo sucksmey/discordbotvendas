@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord.commands import slash_command # CORREÇÃO: Importa de discord.commands
+# from discord.commands import slash_command # REMOVIDO: Importação direta não funciona
 import logging
 import asyncio
 import datetime
@@ -10,28 +10,24 @@ import base64
 import config
 from utils.database import Database
 from utils.embeds import create_embed, create_error_embed, create_success_embed
-from cogs.common_listeners import CommonViews, ConfirmGamepassView # Importa views comuns
+from cogs.common_listeners import CommonViews, ConfirmGamepassView
 
 logger = logging.getLogger('discord_bot')
 
 # --- CONFIGURAÇÃO DO QR CODE E INFORMAÇÕES PIX ---
-# VOCÊ DEVE TER O ARQUIVO qrcode_pix.png DENTRO DA PASTA bot/assets/
-# Ex: bot/assets/qrcode_pix.png
-# O Railway precisa deste arquivo no seu repositório para o deploy.
-# Certifique-se de que a imagem é um PNG ou JPG válido.
+PIX_QR_CODE_IMAGE_URL = "assets/qrcode_pix.png" # Caminho local para o QR Code
+
 
 class RobuxPurchaseInitialView(discord.ui.View):
     def __init__(self, bot: commands.Bot):
-        super().__init__(timeout=None) # View persistente
+        super().__init__(timeout=None)
         self.bot = bot
         self.db: Database = bot.db
 
     @discord.ui.button(label="Comprar Robux", style=discord.ButtonStyle.green, custom_id="start_robux_purchase_button")
     async def start_robux_purchase_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Botão inicial para começar a compra de Robux."""
-        await interaction.response.defer(ephemeral=True) # Resposta ephemera, visível só para o usuário
+        await interaction.response.defer(ephemeral=True)
 
-        # Loga a ação privada
         private_log_channel = self.bot.get_channel(config.PRIVATE_ACTIONS_LOG_CHANNEL_ID)
         if private_log_channel:
             log_embed = create_embed(
@@ -42,14 +38,12 @@ class RobuxPurchaseInitialView(discord.ui.View):
             await private_log_channel.send(embed=log_embed)
             logger.info(f"Usuário {interaction.user.name} ({interaction.user.id}) clicou no botão 'Comprar Robux'.")
 
-        # Verificar se o usuário já tem carrinhos ativos (múltiplos são permitidos, mas avisamos)
         active_carts = await self.db.fetch(
             "SELECT cart_id, thread_id, product_name, quantity_or_value FROM carts WHERE user_id = $1 AND cart_status NOT IN ('completed', 'cancelled', 'expired', 'closed_by_archive')",
             interaction.user.id
         )
 
         if active_carts:
-            # Se já tem carrinhos ativos, lista e pergunta se quer iniciar novo
             embed_existing = create_embed(
                 "🛒 Você já tem compras em andamento!",
                 "**Carrinhos Ativos:**\n" + 
@@ -58,17 +52,16 @@ class RobuxPurchaseInitialView(discord.ui.View):
             )
             class NewPurchaseDecisionView(discord.ui.View):
                 def __init__(self, bot_ref: commands.Bot, user: discord.Member, original_interaction: discord.Interaction):
-                    super().__init__(timeout=60) # Timeout curto para esta view de decisão
+                    super().__init__(timeout=60)
                     self.bot_ref = bot_ref
                     self.user = user
                     self.original_interaction = original_interaction
 
                 async def on_timeout(self):
-                    # Tenta remover os botões se a interação expirar
                     try:
                         await self.original_interaction.edit_original_response(view=None)
                     except discord.NotFound:
-                        pass # Mensagem já deletada ou não encontrada
+                        pass
 
                 @discord.ui.button(label="Iniciar Nova Compra", style=discord.ButtonStyle.green)
                 async def start_new_purchase(self, interaction_btn: discord.Interaction, button: discord.ui.Button):
@@ -76,9 +69,8 @@ class RobuxPurchaseInitialView(discord.ui.View):
                         await interaction_btn.response.send_message(embed=create_error_embed("Este botão não é para você."), ephemeral=True)
                         return
                     await interaction_btn.response.defer(ephemeral=True)
-                    await self.original_interaction.edit_original_response(view=None) # Remove os botões da mensagem de decisão
+                    await self.original_interaction.edit_original_response(view=None)
 
-                    # Iniciar o fluxo principal para nova compra
                     await self.bot_ref.get_cog("Robux")._start_robux_purchase_flow(interaction_btn)
 
                 @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.red)
@@ -87,14 +79,12 @@ class RobuxPurchaseInitialView(discord.ui.View):
                         await interaction_btn.response.send_message(embed=create_error_embed("Este botão não é para você."), ephemeral=True)
                         return
                     await interaction_btn.response.send_message(embed=create_embed("Compra Cancelada", "Você pode iniciar uma nova compra a qualquer momento."), ephemeral=True)
-                    await self.original_interaction.edit_original_response(view=None) # Remove os botões
+                    await self.original_interaction.edit_original_response(view=None)
                     self.stop()
             
-            # Enviar a mensagem com a pergunta para iniciar nova compra
             await interaction.followup.send(embed=embed_existing, view=NewPurchaseDecisionView(self.bot, interaction.user, interaction), ephemeral=True)
             return
 
-        # Se não houver carrinho ativo, inicia o fluxo de seleção de quantidade
         await self._start_robux_purchase_flow(interaction)
 
 class SelectRobuxQuantityView(discord.ui.View):
@@ -143,7 +133,7 @@ class SelectRobuxQuantityView(discord.ui.View):
         except discord.NotFound:
             pass
         except Exception as e:
-            logger.error(f"Erro ao remover view em timeout de SelectRobuxQuantityView: {e}")
+            logger.error(f"Erro ao remover view em timeout de SelectRobuxQuantityView: {e}", exc_info=True)
 
 class RobloxNicknameModal(discord.ui.Modal):
     def __init__(self, bot: commands.Bot, selected_product_name: str, selected_quantity_value: str, selected_price: float, original_interaction_message: discord.Message):
@@ -259,11 +249,8 @@ class PaymentMethodView(CommonViews):
         self.db: Database = bot.db
         self.cart_id = cart_id
         
-        # Obter o user_id do carrinho para CommonViews
-        # self._user_id será definido por setup_view_for_cart_id que é chamado no setup do cog
-        super().__init__(bot, 0) # Inicializa CommonViews temporariamente com user_id 0
+        super().__init__(bot, 0) 
 
-        # Adiciona os botões de método de pagamento
         self.add_item(discord.ui.Button(label="💳 PIX", style=discord.ButtonStyle.green, custom_id="payment_method_pix"))
         self.add_item(discord.ui.Button(label="📄 Boleto (Em Breve)", style=discord.ButtonStyle.grey, custom_id="payment_method_boleto", disabled=True))
         self.add_item(discord.ui.Button(label="💳 Cartão de Crédito (Em Breve)", style=discord.ButtonStyle.grey, custom_id="payment_method_credit_card", disabled=True))
@@ -302,11 +289,10 @@ class PaymentMethodView(CommonViews):
         qr_file_path = "assets/qrcode_pix.png"
 
         try:
-            # Envia a imagem do QR Code como um arquivo anexo
             pix_embed.set_image(url="attachment://qrcode_pix.png")
             await interaction.followup.send(embed=pix_embed, file=discord.File(qr_file_path, filename="qrcode_pix.png"))
         except FileNotFoundError:
-            logger.error(f"Arquivo QR Code não encontrado em {qr_file_path}. Enviando apenas texto.")
+            logger.error(f"Arquivo QR Code não encontrado em {qr_file_path}. Enviando apenas texto.", exc_info=True)
             await interaction.followup.send(embed=pix_embed)
         except Exception as e:
             logger.error(f"Erro ao enviar QR Code: {e}", exc_info=True)
@@ -330,7 +316,7 @@ class Robux(commands.Cog):
         self.bot = bot
         self.db: Database = bot.db
 
-    @slash_command(name="setup_robux_button", description="Envia a mensagem com o botão 'Comprar Robux'.", guild_ids=[config.GUILD_ID])
+    @commands.slash_command(name="setup_robux_button", description="Envia a mensagem com o botão 'Comprar Robux'.", guild_ids=[config.GUILD_ID]) # CORREÇÃO: Usando commands.slash_command
     @commands.has_role(config.ADMIN_ROLE_ID)
     async def setup_robux_button(self, ctx: discord.ApplicationContext):
         if not discord.utils.get(ctx.author.roles, id=config.ADMIN_ROLE_ID):
@@ -382,7 +368,4 @@ class Robux(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Robux(bot))
-    bot.add_view(RobuxPurchaseInitialView(bot)) # Adiciona a view persistente
-    
-    # Adicionar PaymentMethodView para persistência se for usada em mensagens que persistem
-    # bot.add_view(PaymentMethodView(bot, 0)) # user_id 0 porque será ajustado dinamicamente
+    bot.add_view(RobuxPurchaseInitialView(bot))
