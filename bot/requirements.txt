@@ -1,4 +1,4 @@
-discord.py==2.3.2 # Especifica uma versão mais recente e estável
+Pycord==2.4.1 # MUDEI DE discord.py PARA PYCORD
 asyncpg
 python-dotenv
 aiohttp
