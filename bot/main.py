@@ -4,10 +4,9 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 import logging
-from aiohttp import web # Para o servidor web do webhook
 
 from utils.database import Database
-from utils.embeds import create_error_embed, create_embed # Importar as funções de embed
+from utils.embeds import create_error_embed, create_embed
 import config
 
 # Configuração de logging
@@ -27,7 +26,6 @@ class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=config.BOT_PREFIX, intents=intents)
         self.database = Database(os.getenv("DATABASE_URL"))
-        self.web_app = None # Para a aplicação Flask/Aiohttp que rodará o webhook
         
         # Lista de cogs para carregar. Descomente conforme eles forem criados.
         self.initial_extensions = [
@@ -35,8 +33,8 @@ class MyBot(commands.Bot):
             # "cogs.jogos",           # Fluxo de Jogos (futuro)
             # "cogs.giftcard",        # Fluxo de Giftcards (futuro)
             "cogs.common_listeners",  # Listeners comuns e o botão "Pegar Ticket"
+            "cogs.client_area",       # Área do Cliente e histórico (NOVO COG para o botão)
             # "cogs.admin_commands",  # Comandos de administração (futuro)
-            # "cogs.client_area",     # Área do Cliente e histórico (futuro)
         ]
 
     async def setup_hook(self):
@@ -68,25 +66,6 @@ class MyBot(commands.Bot):
             else:
                 logger.warning("GUILD_ID não configurado em config.py. Comandos de barra não serão sincronizados localmente.")
 
-        # Inicializar e rodar o servidor web para webhooks (Mercado Pago)
-        self.web_app = web.Application()
-        # Adicione rotas de webhook aqui, por exemplo:
-        # self.web_app.router.add_post('/mercadopago_webhook', self.handle_mercadopago_webhook)
-        
-        # Para fins de teste inicial e depuração do webhook
-        self.web_app.router.add_get('/test_webhook', self.test_webhook_endpoint)
-        self.web_app.router.add_post('/test_webhook_post', self.test_webhook_post_endpoint)
-
-
-        # Criação da tarefa para rodar o servidor web
-        # O Railway usa a porta 8080 por padrão para aplicações web
-        runner = web.AppRunner(self.web_app)
-        await runner.setup()
-        site = web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 8080)))
-        await site.start()
-        logger.info(f"Servidor web iniciado na porta {os.getenv('PORT', 8080)}")
-
-
     async def on_ready(self):
         """Evento disparado quando o bot está online e pronto."""
         logger.info(f'Bot logado como {self.user} (ID: {self.user.id})')
@@ -95,10 +74,6 @@ class MyBot(commands.Bot):
     async def on_disconnect(self):
         """Evento disparado quando o bot é desconectado."""
         logger.warning("Bot desconectado.")
-        if self.web_app:
-            await self.web_app.shutdown()
-            await self.web_app.cleanup()
-            logger.info("Servidor web desligado.")
 
     async def on_command_error(self, ctx, error):
         """Tratamento de erros para comandos de barra."""
@@ -120,38 +95,12 @@ class MyBot(commands.Bot):
         """Captura e loga erros não tratados de eventos."""
         logger.exception(f"Erro inesperado no evento '{event_method}':")
 
-    # --- Endpoints de Webhook (AIOHTTP) ---
-    async def test_webhook_endpoint(self, request):
-        """Endpoint de teste para verificar se o servidor web está funcionando."""
-        logger.info("Requisição GET recebida em /test_webhook")
-        return web.Response(text="Webhook GET endpoint is working!")
-
-    async def test_webhook_post_endpoint(self, request):
-        """Endpoint de teste para receber requisições POST (simula webhook)."""
-        logger.info("Requisição POST recebida em /test_webhook_post")
-        try:
-            data = await request.json()
-            logger.info(f"Dados do webhook recebidos: {data}")
-            # Em um webhook real do Mercado Pago, você processaria os dados aqui
-            # e chamaria a lógica do bot para atualizar o status do pagamento
-            return web.Response(text="Dados do webhook recebidos com sucesso!", status=200)
-        except Exception as e:
-            logger.error(f"Erro ao processar webhook POST: {e}", exc_info=True)
-            return web.Response(text=f"Erro: {e}", status=400)
-
-    # TODO: Implementar handle_mercadopago_webhook
-    # async def handle_mercadopago_webhook(self, request):
-    #     """Endpoint para receber notificações de IPN do Mercado Pago."""
-    #     # Lógica para validar e processar o webhook do Mercado Pago
-    #     pass
-
 
 # Instanciar e rodar o bot
 bot = MyBot()
 token = os.getenv("DISCORD_BOT_TOKEN")
 
 if token:
-    # Rodar o bot (que também inicializa o servidor web)
     bot.run(token)
 else:
     logger.error("Token do bot não encontrado em .env. Por favor, adicione DISCORD_BOT_TOKEN.")
