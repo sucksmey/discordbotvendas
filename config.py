@@ -29,7 +29,7 @@ GENERAL_LOG_CHANNEL_ID = 1394112959436820520
 # --- CONFIGURAÇÕES GERAIS ---
 EMBED_COLOR = 0xFF69B4
 NEW_CUSTOMER_DISCOUNT_PERCENT = 3
-PIX_KEY = "israbuyshop@gmail.com"
+PIX_KEY = "israbuyshop@gmail.com"  # <-- CHAVE PIX ADICIONADA/CORRIGIDA
 
 # --- PROGRAMA DE FIDELIDADE ---
 LOYALTY_TIERS = [
@@ -61,21 +61,6 @@ ROBUX_PRICES = {
 GAMEPASS_PRICES = {
     100: 3.90, 200: 7.80, 300: 11.70, 400: 15.60, 500: 19.50,
     600: 23.40, 700: 27.30, 800: 31.20, 900: 35.10, 1000: 39.00
-}
-
-GAME_CURRENCIES = {
-    "Valorant": {
-        "125 Valorant Points": 5.00,
-        "475 Valorant Points": 15.00,
-        "1000 Valorant Points": 30.00,
-        "2050 Valorant Points": 60.00,
-    },
-    "Free Fire": {
-        "85 Diamantes": 3.00,
-        "285 Diamantes": 10.00,
-        "610 Diamantes": 20.00,
-        "1060 Diamantes": 30.00,
-    }
 }
 
 # --- FUNÇÕES AUXILIARES DE PREÇO ---
