@@ -35,18 +35,21 @@ async def init_db():
         """)
 
 async def add_purchase(user_id: int, product_name: str, price: float, attendant_id: int, deliverer_id: int):
-    """Adiciona uma compra ao DB e incrementa o contador de compras do usuário."""
+    """Adiciona uma compra ao DB, incrementa o contador e retorna o ID da nova compra e a contagem total."""
     async with pool.acquire() as conn:
         # Garante que o usuário existe
         await conn.execute("INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING;", user_id)
-        # Adiciona a compra
-        await conn.execute(
-            "INSERT INTO purchases (user_id, product_name, price_brl, purchase_date, attendant_id, deliverer_id) VALUES ($1, $2, $3, $4, $5, $6);",
+        
+        # Adiciona a compra e retorna seu ID
+        new_purchase = await conn.fetchrow(
+            "INSERT INTO purchases (user_id, product_name, price_brl, purchase_date, attendant_id, deliverer_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING purchase_id;",
             user_id, product_name, price, datetime.datetime.now(datetime.timezone.utc), attendant_id, deliverer_id
         )
-        # Incrementa o contador de compras
-        result = await conn.fetchrow("UPDATE users SET purchase_count = purchase_count + 1 WHERE user_id = $1 RETURNING purchase_count;", user_id)
-        return result['purchase_count']
+        
+        # Incrementa o contador de compras do usuário
+        user_data = await conn.fetchrow("UPDATE users SET purchase_count = purchase_count + 1 WHERE user_id = $1 RETURNING purchase_count;", user_id)
+        
+        return new_purchase['purchase_id'], user_data['purchase_count']
 
 async def get_purchase_history(user_id: int):
     """Retorna o histórico de compras de um usuário."""
@@ -54,7 +57,7 @@ async def get_purchase_history(user_id: int):
         return await conn.fetch("SELECT product_name, price_brl, purchase_date FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC;", user_id)
 
 async def set_purchase_count(user_id: int, count: int):
-    """Define manualmente a contagem de compras de um usuário."""
+    """Define manually a contagem de compras de um usuário."""
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO users (user_id, purchase_count) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET purchase_count = $2;", user_id, count)
 
