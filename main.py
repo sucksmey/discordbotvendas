@@ -24,7 +24,8 @@ cogs_list = [
     'user_cog',
     'vip_cog',
     'stock_cog',
-    'extras_cog'
+    'store_cog',
+    'calculator_cog'  # <-- ADICIONADO
 ]
 
 for cog in cogs_list:
@@ -42,9 +43,6 @@ async def on_ready():
         print("Conexão com o banco de dados estabelecida.")
     except Exception as e:
         print(f"ERRO: Falha ao conectar ao banco de dados: {e}")
-    
-    # Sincroniza os comandos apenas uma vez, se necessário.
-    # Pode ser comentado após a primeira execução bem-sucedida para acelerar a inicialização.
     await bot.sync_commands(guild_ids=[config.GUILD_ID])
     print('Comandos de barra sincronizados.')
 
@@ -61,4 +59,4 @@ async def on_application_command_error(ctx: discord.ApplicationContext, error: d
 if TOKEN:
     bot.run(TOKEN)
 else:
-    print("ERRO CRÍTICO: DISCORD_TOKEN não foi encontrado. Verifique suas variáveis de ambiente no Railway.")
+    print("ERRO CRÍTICO: DISCORD_TOKEN não encontrado.")
