@@ -13,7 +13,7 @@ class AdminCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(name="entregue", description="Finaliza um pedido, registrando no DB e notificando o cliente.")
+    @commands.slash_command(name="entregue", description="Finaliza um pedido de ROBUX/GAMEPASS.")
     @option("cliente", discord.Member, description="O cliente que recebeu o pedido.")
     @option("produto", str, description="O nome do produto vendido. Ex: 1000 Robux")
     @option("valor", float, description="O valor da compra.")
@@ -25,44 +25,19 @@ class AdminCog(commands.Cog):
         purchase_id, purchase_count = await database.add_purchase(cliente.id, produto, valor, atendente.id, entregador.id)
         total_spent = await database.get_user_spend(cliente.id)
         
-        # --- LÓGICA DA DM CORRIGIDA ---
-        # 1. Monta os botões
-        dm_view = View(timeout=None)
-        dm_view.add_item(Button(
+        review_view = View(timeout=None)
+        review_view.add_item(Button(
             label="⭐ Avaliar esta Compra",
             style=discord.ButtonStyle.success,
             custom_id=f"review_purchase_{purchase_id}"
         ))
-        # Botão que leva o usuário para o canal de compra de VIP
-        vip_channel_url = f"https://discord.com/channels/{ctx.guild.id}/{config.VIP_PURCHASE_CHANNEL_ID}"
-        dm_view.add_item(Button(
-            label="💎 Comprar VIP",
-            style=discord.ButtonStyle.link,
-            url=vip_channel_url,
-            emoji="💎"
-        ))
-
-        # 2. Monta o embed da DM
         dm_embed = discord.Embed(title="🎉 Pedido Entregue!", color=config.EMBED_COLOR)
         dm_embed.description = (
             f"Olá, {cliente.display_name}! Seu produto **({produto})** foi entregue com sucesso.\n\n"
-            f"Você pode verificar o saldo pendente em: [Roblox Transactions]({config.PENDING_ROBUX_URL})\n\n"
-            "Obrigado pela sua preferência!\n\n"
             "Sua opinião é muito importante. Por favor, clique no botão abaixo para avaliar este atendimento."
         )
+        await log_dm(self.bot, cliente, embed=dm_embed, view=review_view)
 
-        # 3. Adiciona o benefício VIP se o cliente tiver o cargo
-        vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
-        if vip_role and vip_role in cliente.roles:
-            dm_embed.add_field(
-                name="⭐ Benefício VIP",
-                value=f"Como VIP, você pode comprar 1k de Robux por R${config.VIP_ROBUX_DEAL_PRICE:.2f} até {config.VIP_DEAL_USES_PER_MONTH}x por mês."
-            )
-        
-        # 4. Envia a DM com o embed e os botões
-        await log_dm(self.bot, cliente, embed=dm_embed, view=dm_view)
-
-        # --- EMBED DE LOG DE ENTREGA CORRIGIDO ---
         delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
         if delivery_log_channel:
             log_embed = discord.Embed(
@@ -72,31 +47,72 @@ class AdminCog(commands.Cog):
             )
             log_embed.set_author(name="🛒 Nova Compra na IsraBuy!", icon_url=self.bot.user.display_avatar.url)
             log_embed.set_thumbnail(url=cliente.display_avatar.url)
-
             log_embed.add_field(name="Produto Comprado", value=produto, inline=False)
             log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=False)
-            
             compra_str = "🎉 **Esta é a primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra** do cliente."
             log_embed.add_field(name="Histórico do Cliente", value=compra_str, inline=False)
-            
-            # --- CORREÇÃO DO VALOR TOTAL GASTO ---
             log_embed.add_field(name="Total Gasto na Loja", value=f"R$ {float(total_spent):.2f}", inline=False)
-            
             log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True)
             log_embed.add_field(name="Entregue por", value=entregador.mention, inline=True)
-
+            vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
             if vip_role and vip_role in cliente.roles:
                 log_embed.add_field(name="Status", value="⭐ **Cliente VIP**", inline=False)
-            
             await delivery_log_channel.send(embed=log_embed)
 
-        # --- Log de Fidelidade (permanece o mesmo) ---
         loyalty_channel = self.bot.get_channel(config.LOYALTY_LOG_CHANNEL_ID)
         if loyalty_channel:
             loyalty_embed = self.create_loyalty_embed(cliente, purchase_count)
             await loyalty_channel.send(embed=loyalty_embed)
         
         await ctx.respond(f"O pedido de {cliente.mention} foi marcado como entregue!", ephemeral=True)
+
+    @commands.slash_command(name="entregueitem", description="Finaliza a entrega de um item com estoque (Extras, etc).")
+    @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
+    @option("cliente", discord.Member, description="O cliente que recebeu o pedido.")
+    @option("item_id", int, description="O ID do produto que foi vendido.")
+    @option("atendente", discord.Member, description="Quem atendeu o pedido.")
+    async def entregue_item(self, ctx: discord.ApplicationContext, cliente: discord.Member, item_id: int, atendente: discord.Member):
+        entregador = ctx.author
+        
+        product = await database.get_product_by_id(item_id)
+        if not product:
+            return await ctx.respond("❌ Produto com este ID não encontrado.", ephemeral=True)
+        
+        if product['stock'] <= 0:
+            await ctx.respond(f"⚠️ Atenção: O estoque de **{product['name']}** já está zerado. A venda será registrada, mas verifique o estoque.", ephemeral=True)
+
+        await database.update_stock(item_id, -1)
+        
+        product_name = product['name']
+        price = float(product['price'])
+        purchase_id, purchase_count = await database.add_purchase(cliente.id, product_name, price, atendente.id, entregador.id)
+        total_spent = await database.get_user_spend(cliente.id)
+
+        review_view = View(timeout=None)
+        review_view.add_item(Button(label="⭐ Avaliar esta Compra", style=discord.ButtonStyle.success, custom_id=f"review_purchase_{purchase_id}"))
+        dm_embed = discord.Embed(title="🎉 Pedido Entregue!", description=f"Olá, {cliente.display_name}! Seu produto **({product_name})** foi entregue com sucesso. Agradecemos a preferência!", color=config.EMBED_COLOR)
+        await log_dm(self.bot, cliente, embed=dm_embed, view=review_view)
+
+        delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
+        if delivery_log_channel:
+            log_embed = discord.Embed(description=f"Obrigado, {cliente.mention}, por comprar conosco!", color=0x28a745, timestamp=datetime.datetime.now())
+            log_embed.set_author(name=f"✨ Nova Compra de Item na IsraBuy!", icon_url=self.bot.user.display_avatar.url)
+            log_embed.set_thumbnail(url=cliente.display_avatar.url)
+            log_embed.add_field(name="Produto Comprado", value=product_name, inline=False)
+            log_embed.add_field(name="Valor Pago", value=f"R$ {price:.2f}", inline=False)
+            compra_str = "🎉 **Esta é a primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra** do cliente."
+            log_embed.add_field(name="Histórico do Cliente", value=compra_str, inline=False)
+            log_embed.add_field(name="Total Gasto na Loja", value=f"R$ {float(total_spent):.2f}", inline=False)
+            log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True)
+            log_embed.add_field(name="Entregue por", value=entregador.mention, inline=True)
+            await delivery_log_channel.send(embed=log_embed)
+        
+        loyalty_channel = self.bot.get_channel(config.LOYALTY_LOG_CHANNEL_ID)
+        if loyalty_channel:
+            loyalty_embed = self.create_loyalty_embed(cliente, purchase_count)
+            await loyalty_channel.send(embed=loyalty_embed)
+
+        await ctx.respond(f"✅ Entrega do item **{product_name}** para {cliente.mention} confirmada! Estoque atualizado.", ephemeral=True)
 
     @commands.slash_command(name="addcompra", description="Adiciona manualmente uma compra antiga para um usuário.")
     @option("cliente", discord.Member, description="O cliente que fez a compra.")
@@ -122,7 +138,7 @@ class AdminCog(commands.Cog):
         if not isinstance(ctx.channel, discord.Thread):
             await ctx.respond("Este comando só pode ser usado em um carrinho (tópico).", ephemeral=True)
             return
-        if not ctx.channel.name.startswith(("🛒", "🎟️", "💎")):
+        if not ctx.channel.name.startswith(("🛒", "🎟️", "💎", "✨", "🎮")):
             await ctx.respond("Este não parece ser um carrinho de compras válido.", ephemeral=True)
             return
         await ctx.respond("Fechando e arquivando este carrinho...", ephemeral=True)
