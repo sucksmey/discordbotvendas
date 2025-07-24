@@ -23,7 +23,8 @@ cogs_list = [
     'sales_cog',
     'admin_cog',
     'evaluation_cog',
-    'user_cog'
+    'user_cog',
+    'vip_cog'
 ]
 
 # Carregar os cogs
@@ -69,4 +70,7 @@ async def on_application_command_error(ctx: discord.ApplicationContext, error: d
         await ctx.followup.send(embed=embed, ephemeral=True)
 
 # Iniciar o bot
-bot.run(TOKEN)
+if TOKEN:
+    bot.run(TOKEN)
+else:
+    print("ERRO CRÍTICO: O DISCORD_TOKEN não foi encontrado nas variáveis de ambiente.")
