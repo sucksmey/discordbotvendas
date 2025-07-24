@@ -9,17 +9,34 @@ import os
 import config
 from utils.logger import log_command
 
-# --- Funções Auxiliares ---
-def parse_robux_amount(text: str) -> int:
-    text = text.lower().replace('robux', '').strip()
-    text = text.replace('.', '')
-    text = text.replace(',', '.')
-    if 'k' in text:
-        return int(float(text.replace('k', '')) * 1000)
-    numeric_part = re.sub(r'[^0-9]', '', text)
-    return int(numeric_part) if numeric_part else 0
+class InitialPurchaseView(View):
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
 
-# --- Views (Componentes de UI) ---
+    # --- EMOJI CORRIGIDO AQUI ---
+    @button(label="Comprar Robux", style=discord.ButtonStyle.success, custom_id="buy_robux", emoji="💰")
+    async def buy_robux_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        await SalesCog.start_robux_purchase(self.bot, interaction)
+
+    @button(label="Comprar Gamepass", style=discord.ButtonStyle.primary, custom_id="buy_gamepass", emoji="🎟️")
+    async def buy_gamepass_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        await SalesCog.start_gamepass_purchase(self.bot, interaction)
+
+    @button(label="Ver Tabela de Preços", style=discord.ButtonStyle.secondary, custom_id="show_prices")
+    async def show_prices_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        await log_command(self.bot, interaction, is_button=True, button_id="Ver Tabela de Preços")
+        embed = discord.Embed(title="Tabela de Preços - IsraBuy", description="Confira nossos valores competitivos!", color=config.EMBED_COLOR)
+        
+        # --- EMOJI CORRIGIDO AQUI TAMBÉM ---
+        robux_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.ROBUX_PRICES.items()])
+        gamepass_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.GAMEPASS_PRICES.items()])
+        
+        embed.add_field(name="💰 Compra Direta (Robux)", value=robux_prices_str, inline=True)
+        embed.add_field(name="🎟️ Compra via Gamepass", value=gamepass_prices_str, inline=True)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 class GamepassCreationView(View):
     def __init__(self, bot, thread, required_value):
         super().__init__(timeout=None)
@@ -42,35 +59,6 @@ class GamepassCreationView(View):
         await self.thread.send(config.TUTORIAL_VIDEO_URL)
         await self.thread.send("Após criar, envie o link ou o ID da sua Gamepass aqui.")
         self.stop()
-
-class InitialPurchaseView(View):
-    def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
-
-    @button(label="Comprar Robux", style=discord.ButtonStyle.success, custom_id="buy_robux", emoji="<:robux:1123592149533339708>")
-    async def buy_robux_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
-        # Corrigido para chamar o método estático da classe Cog
-        await SalesCog.start_robux_purchase(self.bot, interaction)
-
-    @button(label="Comprar Gamepass", style=discord.ButtonStyle.primary, custom_id="buy_gamepass", emoji="🎟️")
-    async def buy_gamepass_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
-        # Corrigido para chamar o método estático da classe Cog
-        await SalesCog.start_gamepass_purchase(self.bot, interaction)
-
-    @button(label="Ver Tabela de Preços", style=discord.ButtonStyle.secondary, custom_id="show_prices")
-    async def show_prices_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
-        await log_command(self.bot, interaction, is_button=True, button_id="Ver Tabela de Preços")
-        embed = discord.Embed(title="Tabela de Preços - IsraBuy", description="Confira nossos valores competitivos!", color=config.EMBED_COLOR)
-        
-        robux_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.ROBUX_PRICES.items()])
-        gamepass_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.GAMEPASS_PRICES.items()])
-        
-        embed.add_field(name="<:robux:1123592149533339708> Compra Direta (Robux)", value=robux_prices_str, inline=True)
-        embed.add_field(name="🎟️ Compra via Gamepass", value=gamepass_prices_str, inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 class SalesCog(commands.Cog):
     def __init__(self, bot):
