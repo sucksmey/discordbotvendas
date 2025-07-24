@@ -78,7 +78,15 @@ class SalesCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         u, c = interaction.user, interaction.channel
         t = await c.create_thread(name=f"🛒 Robux - {u.display_name}", type=discord.ChannelType.private_thread)
+        
+        # --- ALTERAÇÃO AQUI: Adiciona o cliente e os atendentes ---
         await t.add_user(u)
+        for role_id in config.ATTENDANT_ROLE_IDS:
+            role = interaction.guild.get_role(role_id)
+            if role:
+                for member in role.members:
+                    await t.add_user(member)
+        
         await interaction.followup.send(f"Seu carrinho para Robux foi criado aqui: {t.mention}", ephemeral=True)
         
         log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
@@ -143,7 +151,15 @@ class SalesCog(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         u, c = interaction.user, interaction.channel
         t = await c.create_thread(name=f"🎟️ Gamepass - {u.display_name}", type=discord.ChannelType.private_thread)
+
+        # --- ALTERAÇÃO AQUI: Adiciona o cliente e os atendentes ---
         await t.add_user(u)
+        for role_id in config.ATTENDANT_ROLE_IDS:
+            role = interaction.guild.get_role(role_id)
+            if role:
+                for member in role.members:
+                    await t.add_user(member)
+
         await interaction.followup.send(f"Seu carrinho para Gamepass foi criado aqui: {t.mention}", ephemeral=True)
         
         log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
@@ -206,7 +222,7 @@ class SalesCog(commands.Cog):
             
             t = self.bot.get_channel(tid)
             if t:
-                await t.add_user(att)
+                # Não precisa adicionar o atendente aqui, pois ele já foi adicionado na criação
                 await t.send(f"Olá! Eu sou {att.mention} e vou finalizar a sua entrega.")
 
             await (await interaction.original_response()).edit(content=f"Pedido assumido por {att.mention}!", view=None)
