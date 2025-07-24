@@ -36,17 +36,23 @@ class ExtrasCog(commands.Cog):
     async def select_extra_item(self, interaction: discord.Interaction):
         products = await database.get_products_by_category("Extras")
         if not products:
-            return await interaction.response.send_message("Desculpe, não temos nenhum item extra em estoque no momento.", ephemeral=True)
+            return await interaction.response.send_message("Desculpe, não temos nenhum item extra cadastrado no momento.", ephemeral=True)
         
         options = []
+        # --- CORREÇÃO APLICADA AQUI ---
+        # Agora, apenas itens com estoque maior que zero são adicionados à lista.
         for p in products:
-            options.append(discord.SelectOption(
-                label=f"{p['name']} - R$ {p['price']:.2f}",
-                value=str(p['product_id']),
-                description=f"Estoque: {p['stock']}",
-                emoji="🎁" if p['stock'] > 0 else "❌",
-                disabled=p['stock'] == 0
-            ))
+            if p['stock'] > 0:
+                options.append(discord.SelectOption(
+                    label=f"{p['name']} - R$ {p['price']:.2f}",
+                    value=str(p['product_id']),
+                    description=f"Estoque disponível: {p['stock']}",
+                    emoji="🎁"
+                ))
+
+        # Se depois de filtrar não sobrar nenhuma opção, avisa o usuário.
+        if not options:
+            return await interaction.response.send_message("Desculpe, todos os nossos itens extras estão esgotados no momento.", ephemeral=True)
 
         select = Select(placeholder="Selecione um produto...", options=options, custom_id="extra_select")
         
@@ -57,13 +63,15 @@ class ExtrasCog(commands.Cog):
         select.callback = select_callback
         view = View(timeout=180)
         view.add_item(select)
-        await interaction.response.send_message("Escolha um dos nossos itens extras:", view=view, ephemeral=True)
+        await interaction.response.send_message("Escolha um dos nossos itens extras disponíveis:", view=view, ephemeral=True)
 
     async def start_extra_purchase(self, interaction: discord.Interaction, product_id: int):
         await interaction.response.defer()
         product = await database.get_product_by_id(product_id)
         if not product or product['stock'] <= 0:
-            return await interaction.followup.send(content="Desculpe, este item esgotou ou não existe mais.", view=None)
+            # Esta verificação dupla garante que o item não foi comprado enquanto o usuário decidia.
+            await interaction.followup.send(content="Desculpe, este item esgotou ou não existe mais.", view=None, ephemeral=True)
+            return
 
         user = interaction.user
         thread = await interaction.channel.create_thread(name=f"✨ {product['name']} - {user.display_name}", type=discord.ChannelType.private_thread)
