@@ -199,14 +199,17 @@ class SalesCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        """Este método é chamado quando o bot está pronto. É o lugar seguro para registrar views persistentes."""
         self.bot.add_view(InitialPurchaseView(bot=self.bot))
         print("View de vendas persistente registrada.")
-
-    @commands.command(name="iniciarvendas")
+        
+    # COMANDO CORRIGIDO AQUI
+    @commands.slash_command(
+        name="iniciarvendas",
+        description="Cria o painel inicial de vendas no canal de compras.",
+        guild_ids=[config.GUILD_ID]
+    )
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
-    async def start_sales(self, ctx):
-        """Cria o painel inicial de vendas."""
+    async def start_sales(self, ctx: discord.ApplicationContext):
         embed = discord.Embed(
             title="🛒 Central de Pedidos da IsraBuy",
             description="Nossa loja oferece os melhores produtos com os melhores preços do Brasil!\n\n"
@@ -221,14 +224,15 @@ class SalesCog(commands.Cog):
                 embed=embed,
                 view=InitialPurchaseView(bot=self.bot)
             )
-        await ctx.send("Painel de vendas criado com sucesso!", ephemeral=True)
+            await ctx.respond("Painel de vendas criado com sucesso!", ephemeral=True)
+        else:
+            await ctx.respond("Erro: Canal de compras não encontrado. Verifique o ID no `config.py`.", ephemeral=True)
 
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         custom_id = interaction.data.get("custom_id", "")
         if custom_id.startswith("attend_order_"):
-            # Valida se o usuário tem o cargo para atender
             user_roles = [role.id for role in interaction.user.roles]
             if not any(role_id in config.ATTENDANT_ROLE_IDS for role_id in user_roles):
                 await interaction.response.send_message("Você não tem permissão para atender pedidos.", ephemeral=True)
@@ -243,11 +247,12 @@ class SalesCog(commands.Cog):
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             
             log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
-            log_embed = discord.Embed(
-                description=f"Atendente {attendant.mention} está cuidando do pedido de {user.mention} (Valor: R$ {price:.2f})",
-                color=0x32CD32
-            )
-            await log_channel.send(embed=log_embed)
+            if log_channel:
+                log_embed = discord.Embed(
+                    description=f"Atendente {attendant.mention} está cuidando do pedido de {user.mention} (Valor: R$ {price:.2f})",
+                    color=0x32CD32
+                )
+                await log_channel.send(embed=log_embed)
             
             thread = self.bot.get_channel(thread_id)
             if thread:
