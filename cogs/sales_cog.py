@@ -9,34 +9,17 @@ import os
 import config
 from utils.logger import log_command
 
-class InitialPurchaseView(View):
-    def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
+# --- Funções Auxiliares ---
+def parse_robux_amount(text: str) -> int:
+    text = text.lower().replace('robux', '').strip()
+    text = text.replace('.', '')
+    text = text.replace(',', '.')
+    if 'k' in text:
+        return int(float(text.replace('k', '')) * 1000)
+    numeric_part = re.sub(r'[^0-9]', '', text)
+    return int(numeric_part) if numeric_part else 0
 
-    # --- EMOJI CORRIGIDO AQUI ---
-    @button(label="Comprar Robux", style=discord.ButtonStyle.success, custom_id="buy_robux", emoji="💰")
-    async def buy_robux_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
-        await SalesCog.start_robux_purchase(self.bot, interaction)
-
-    @button(label="Comprar Gamepass", style=discord.ButtonStyle.primary, custom_id="buy_gamepass", emoji="🎟️")
-    async def buy_gamepass_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
-        await SalesCog.start_gamepass_purchase(self.bot, interaction)
-
-    @button(label="Ver Tabela de Preços", style=discord.ButtonStyle.secondary, custom_id="show_prices")
-    async def show_prices_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
-        await log_command(self.bot, interaction, is_button=True, button_id="Ver Tabela de Preços")
-        embed = discord.Embed(title="Tabela de Preços - IsraBuy", description="Confira nossos valores competitivos!", color=config.EMBED_COLOR)
-        
-        # --- EMOJI CORRIGIDO AQUI TAMBÉM ---
-        robux_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.ROBUX_PRICES.items()])
-        gamepass_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.GAMEPASS_PRICES.items()])
-        
-        embed.add_field(name="💰 Compra Direta (Robux)", value=robux_prices_str, inline=True)
-        embed.add_field(name="🎟️ Compra via Gamepass", value=gamepass_prices_str, inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
+# --- Views (Componentes de UI) ---
 class GamepassCreationView(View):
     def __init__(self, bot, thread, required_value):
         super().__init__(timeout=None)
@@ -60,6 +43,36 @@ class GamepassCreationView(View):
         await self.thread.send("Após criar, envie o link ou o ID da sua Gamepass aqui.")
         self.stop()
 
+class InitialPurchaseView(View):
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+
+    @button(label="Comprar Robux", style=discord.ButtonStyle.success, custom_id="buy_robux", emoji="💰")
+    async def buy_robux_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        sales_cog = self.bot.get_cog('SalesCog')
+        if sales_cog:
+            await sales_cog.start_robux_purchase(interaction)
+
+    @button(label="Comprar Gamepass", style=discord.ButtonStyle.primary, custom_id="buy_gamepass", emoji="🎟️")
+    async def buy_gamepass_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        sales_cog = self.bot.get_cog('SalesCog')
+        if sales_cog:
+            await sales_cog.start_gamepass_purchase(interaction)
+
+    @button(label="Ver Tabela de Preços", style=discord.ButtonStyle.secondary, custom_id="show_prices")
+    async def show_prices_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        await log_command(self.bot, interaction, is_button=True, button_id="Ver Tabela de Preços")
+        embed = discord.Embed(title="Tabela de Preços - IsraBuy", description="Confira nossos valores competitivos!", color=config.EMBED_COLOR)
+        
+        robux_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.ROBUX_PRICES.items()])
+        gamepass_prices_str = "\n".join([f"**{amount} Robux:** R$ {price:.2f}" for amount, price in config.GAMEPASS_PRICES.items()])
+        
+        embed.add_field(name="💰 Compra Direta (Robux)", value=robux_prices_str, inline=True)
+        embed.add_field(name="🎟️ Compra via Gamepass", value=gamepass_prices_str, inline=True)
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 class SalesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -80,8 +93,7 @@ class SalesCog(commands.Cog):
         else:
             await ctx.respond("Erro: Canal de compras não encontrado.", ephemeral=True)
 
-    @staticmethod
-    async def start_robux_purchase(bot, interaction: discord.Interaction):
+    async def start_robux_purchase(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         user = interaction.user
         thread = await interaction.channel.create_thread(name=f"🛒 Robux - {user.display_name}", type=discord.ChannelType.private_thread)
@@ -95,10 +107,10 @@ class SalesCog(commands.Cog):
             return m.author == user and m.channel == thread
 
         try:
-            msg_nickname = await bot.wait_for('message', check=check, timeout=300.0)
+            msg_nickname = await self.bot.wait_for('message', check=check, timeout=300.0)
             nickname = msg_nickname.content
             await thread.send(f"Entendido, **{nickname}**! Agora, qual a **quantidade de Robux** que você deseja comprar?")
-            msg_amount = await bot.wait_for('message', check=check, timeout=300.0)
+            msg_amount = await self.bot.wait_for('message', check=check, timeout=300.0)
             amount = parse_robux_amount(msg_amount.content)
 
             if not (100 <= amount <= 10000):
@@ -130,10 +142,10 @@ class SalesCog(commands.Cog):
             else:
                 await thread.send(embed=payment_embed)
 
-            msg_receipt = await bot.wait_for('message', check=lambda m: m.author == user and m.channel == thread and m.attachments, timeout=600.0)
+            msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author == user and m.channel == thread and m.attachments, timeout=600.0)
             await thread.send("✅ Comprovante recebido!")
 
-            admin_channel = bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
+            admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
             admin_view = View(timeout=None)
             admin_view.add_item(Button(label="Atender Robux", style=discord.ButtonStyle.green, custom_id=f"attend_robux_{thread.id}_{user.id}_{price}_{amount}"))
             admin_embed = discord.Embed(title="🔔 Novo Pedido de Robux!", description=f"O cliente {user.mention} enviou um comprovante para **{amount} Robux** no valor de **R$ {price:.2f}**.", color=0x2ECC71)
@@ -141,11 +153,11 @@ class SalesCog(commands.Cog):
 
             receipt_embed = discord.Embed(description=f"{user.mention}, recebemos seu comprovante! A entrega é via Gamepass, você sabe criar uma?", color=config.EMBED_COLOR)
             required_value = config.get_gamepass_value(amount)
-            await thread.send(embed=receipt_embed, view=GamepassCreationView(bot, thread, required_value))
+            await thread.send(embed=receipt_embed, view=GamepassCreationView(self.bot, thread, required_value))
 
-            msg_gamepass_link = await bot.wait_for('message', check=check, timeout=300.0)
+            msg_gamepass_link = await self.bot.wait_for('message', check=check, timeout=300.0)
             await thread.send("**⚠️ ATENÇÃO!**\nOs **preços regionais** precisam estar **DESATIVADOS**.\n\nVocê confirma que desativou?")
-            await bot.wait_for('message', check=check, timeout=300.0)
+            await self.bot.wait_for('message', check=check, timeout=300.0)
             await thread.send("Obrigado pela confirmação! Um atendente já está com seu pedido.")
 
         except asyncio.TimeoutError:
@@ -153,8 +165,7 @@ class SalesCog(commands.Cog):
             await asyncio.sleep(10)
             await thread.edit(archived=True, locked=True)
 
-    @staticmethod
-    async def start_gamepass_purchase(bot, interaction: discord.Interaction):
+    async def start_gamepass_purchase(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         user = interaction.user
         thread = await interaction.channel.create_thread(name=f"🎟️ GP - {user.display_name}", type=discord.ChannelType.private_thread)
@@ -168,7 +179,7 @@ class SalesCog(commands.Cog):
             return m.author == user and m.channel == thread
 
         try:
-            msg_amount = await bot.wait_for('message', check=check, timeout=300.0)
+            msg_amount = await self.bot.wait_for('message', check=check, timeout=300.0)
             amount = parse_robux_amount(msg_amount.content)
 
             if not (100 <= amount <= 10000):
@@ -177,7 +188,7 @@ class SalesCog(commands.Cog):
 
             price = config.calculate_gamepass_price(amount)
             await thread.send(f"Entendido! Agora, por favor, me informe seu **nickname no Roblox**.")
-            msg_nickname = await bot.wait_for('message', check=check, timeout=300.0)
+            msg_nickname = await self.bot.wait_for('message', check=check, timeout=300.0)
             nickname = msg_nickname.content
 
             payment_embed = discord.Embed(title="✅ Pedido Resumido (Gamepass)", description=f"**Nickname:** `{nickname}`\n**Quantidade:** `{amount}` Robux\n**Valor a pagar:** `R$ {price:.2f}`\n\nPor favor, realize o pagamento via PIX e envie o comprovante aqui.", color=config.EMBED_COLOR)
@@ -191,19 +202,19 @@ class SalesCog(commands.Cog):
             else:
                 await thread.send(embed=payment_embed)
 
-            msg_receipt = await bot.wait_for('message', check=lambda m: m.author == user and m.channel == thread and m.attachments, timeout=600.0)
+            msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author == user and m.channel == thread and m.attachments, timeout=600.0)
             await thread.send("✅ Comprovante recebido!")
 
-            admin_channel = bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
+            admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
             admin_view = View(timeout=None)
             admin_view.add_item(Button(label="Atender Gamepass", style=discord.ButtonStyle.blurple, custom_id=f"attend_gamepass_{thread.id}_{user.id}_{price}_{amount}"))
             admin_embed = discord.Embed(title="🔔 Novo Pedido de Gamepass!", description=f"O cliente {user.mention} enviou um comprovante para **{amount} Robux via Gamepass** no valor de **R$ {price:.2f}**.", color=0x5865F2)
             await admin_channel.send(embed=admin_embed, view=admin_view)
             
             await thread.send(f"Obrigado! Agora, por favor, envie o **link do seu jogo** no Roblox.")
-            msg_game_link = await bot.wait_for('message', check=check, timeout=300.0)
+            msg_game_link = await self.bot.wait_for('message', check=check, timeout=300.0)
             await thread.send("**⚠️ IMPORTANTE!**\nSeu jogo precisa ter um sistema de **Giftpass** para que a entrega seja feita.\n\nVocê confirma que o jogo possui esse sistema?")
-            await bot.wait_for('message', check=check, timeout=300.0)
+            await self.bot.wait_for('message', check=check, timeout=300.0)
             await thread.send("Obrigado pela confirmação! Um atendente já está com seu pedido.")
 
         except asyncio.TimeoutError:
