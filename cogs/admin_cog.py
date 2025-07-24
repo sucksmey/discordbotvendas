@@ -23,50 +23,60 @@ class AdminCog(commands.Cog):
         entregador = ctx.author
 
         purchase_id, purchase_count = await database.add_purchase(cliente.id, produto, valor, atendente.id, entregador.id)
+        total_spent = await database.get_user_spend(cliente.id)
         
+        # --- Lógica da DM ---
         review_view = View(timeout=None)
         review_view.add_item(Button(
             label="⭐ Avaliar esta Compra",
             style=discord.ButtonStyle.success,
             custom_id=f"review_purchase_{purchase_id}"
         ))
-
         dm_embed = discord.Embed(title="🎉 Pedido Entregue!", color=config.EMBED_COLOR)
         dm_embed.description = (
             f"Olá, {cliente.display_name}! Seu produto **({produto})** foi entregue com sucesso.\n\n"
-            f"Você pode verificar o saldo pendente de Robux em: [Roblox Transactions]({config.PENDING_ROBUX_URL})\n\n"
-            "**Obrigado pela sua preferência!**\n\n"
-            "Sua opinião é muito importante para nós. Por favor, clique no botão abaixo para avaliar este atendimento."
+            "Sua opinião é muito importante. Por favor, clique no botão abaixo para avaliar este atendimento."
         )
-        
         await log_dm(self.bot, cliente, embed=dm_embed, view=review_view)
 
-        # --- CÓDIGO DO LOG DE ENTREGA RESTAURADO AQUI ---
+        # --- NOVO EMBED DE LOG DE ENTREGA ---
         delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
         if delivery_log_channel:
+            
             log_embed = discord.Embed(
-                title="✅ Compra Aprovada e Entregue!",
-                color=0x28a745,
+                description=f"Obrigado, {cliente.mention}, por comprar conosco!",
+                color=0x28a745, # Verde
                 timestamp=datetime.datetime.now()
             )
-            log_embed.add_field(name="Cliente", value=cliente.mention, inline=True)
-            log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=True)
-            log_embed.add_field(name="Produto", value=produto, inline=False)
+            log_embed.set_author(name="🛒 Nova Compra na IsraBuy!", icon_url=self.bot.user.display_avatar.url)
+            log_embed.set_thumbnail(url=cliente.display_avatar.url)
+
+            # Informações da compra
+            log_embed.add_field(name="Produto Comprado", value=produto, inline=False)
+            log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=False)
+            
+            # Informações do cliente
+            compra_str = "🎉 **Esta é a primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra** do cliente."
+            log_embed.add_field(name="Histórico do Cliente", value=compra_str, inline=False)
+            log_embed.add_field(name="Total Gasto na Loja", value=f"R$ {total_spent:.2f}", inline=False)
+            
+            # Informações do atendimento
             log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True)
             log_embed.add_field(name="Entregue por", value=entregador.mention, inline=True)
-            
+
             vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
-            if vip_role in cliente.roles:
-                log_embed.add_field(name="Status VIP", value="⭐ Cliente VIP!", inline=False)
+            if vip_role and vip_role in cliente.roles:
+                log_embed.add_field(name="Status", value="⭐ **Cliente VIP**", inline=False)
             
             await delivery_log_channel.send(embed=log_embed)
 
+        # --- Log de Fidelidade (permanece o mesmo) ---
         loyalty_channel = self.bot.get_channel(config.LOYALTY_LOG_CHANNEL_ID)
         if loyalty_channel:
             loyalty_embed = self.create_loyalty_embed(cliente, purchase_count)
             await loyalty_channel.send(embed=loyalty_embed)
         
-        await ctx.respond(f"O pedido de {cliente.mention} foi marcado como entregue e o convite para avaliação foi enviado!", ephemeral=True)
+        await ctx.respond(f"O pedido de {cliente.mention} foi marcado como entregue!", ephemeral=True)
 
     @commands.slash_command(name="addcompra", description="Adiciona manualmente uma compra antiga para um usuário.")
     @option("cliente", discord.Member, description="O cliente que fez a compra.")
@@ -85,49 +95,31 @@ class AdminCog(commands.Cog):
         await database.set_purchase_count(cliente.id, compras)
         await ctx.respond(f"A contagem de compras de {cliente.mention} foi definida para **{compras}**.", ephemeral=True)
     
-    @commands.slash_command(
-        name="fechar",
-        description="Fecha e arquiva o carrinho de compras atual.",
-        guild_ids=[config.GUILD_ID]
-    )
+    @commands.slash_command(name="fechar", description="Fecha e arquiva o carrinho de compras atual.")
     @option("motivo", str, description="O motivo para fechar o carrinho (opcional).", required=False)
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
     async def fechar(self, ctx: discord.ApplicationContext, motivo: str = "Carrinho fechado pela equipe por inatividade."):
         if not isinstance(ctx.channel, discord.Thread):
             await ctx.respond("Este comando só pode ser usado em um carrinho (tópico).", ephemeral=True)
             return
-
         if not ctx.channel.name.startswith(("🛒", "🎟️", "💎")):
             await ctx.respond("Este não parece ser um carrinho de compras válido.", ephemeral=True)
             return
-            
         await ctx.respond("Fechando e arquivando este carrinho...", ephemeral=True)
-
-        close_embed = discord.Embed(
-            title="🛒 Carrinho Fechado",
-            description=f"Este carrinho foi fechado por {ctx.author.mention}.\n**Motivo:** {motivo}",
-            color=discord.Color.red()
-        )
+        close_embed = discord.Embed(title="🛒 Carrinho Fechado", description=f"Este carrinho foi fechado por {ctx.author.mention}.\n**Motivo:** {motivo}", color=discord.Color.red())
         try:
             await ctx.channel.send(embed=close_embed)
-            
             log_channel = self.bot.get_channel(config.GENERAL_LOG_CHANNEL_ID)
             if log_channel:
                 await log_channel.send(f"🔒 O carrinho `{ctx.channel.name}` foi fechado por {ctx.author.mention}. Motivo: {motivo}")
-
             await ctx.channel.edit(archived=True, locked=True)
         except Exception as e:
             print(f"Erro ao fechar o tópico: {e}")
             await ctx.followup.send("Ocorreu um erro ao fechar o tópico.", ephemeral=True)
 
     def create_loyalty_embed(self, user: discord.Member, count: int):
-        embed = discord.Embed(
-            title=f"🌟 Programa de Fidelidade de {user.display_name}",
-            description=f"{user.mention} tem atualmente **{count} compras verificadas**.",
-            color=config.EMBED_COLOR
-        )
+        embed = discord.Embed(title=f"🌟 Programa de Fidelidade de {user.display_name}", description=f"{user.mention} tem atualmente **{count} compras verificadas**.", color=config.EMBED_COLOR)
         embed.set_thumbnail(url=user.display_avatar.url)
-
         for required, title, reward in config.LOYALTY_TIERS:
             if count >= required:
                 embed.add_field(name=f"✅ {title}", value=reward, inline=False)
