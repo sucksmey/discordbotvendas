@@ -7,48 +7,35 @@ from dotenv import load_dotenv
 import config
 import database
 
-# --- NOVO: Módulo de Utilitários para Logging ---
-# Crie uma pasta 'utils' e dentro dela um arquivo 'logger.py'
-# utils/logger.py
-async def log_dm(bot, user, **kwargs):
-    """Envia uma DM e loga a ação."""
-    log_channel = bot.get_channel(config.GENERAL_LOG_CHANNEL_ID)
-    try:
-        await user.send(**kwargs)
-        if log_channel:
-            await log_channel.send(f"ℹ️ DM enviada com sucesso para {user.mention}.")
-    except discord.Forbidden:
-        if log_channel:
-            await log_channel.send(f"⚠️ Falha ao enviar DM para {user.mention} (DM fechada).")
-
-async def log_command(bot, ctx):
-    """Loga o uso de um comando."""
-    log_channel = bot.get_channel(config.GENERAL_LOG_CHANNEL_ID)
-    if log_channel:
-        await log_channel.send(f"ℹ️ O usuário {ctx.author.mention} usou o comando `/{ctx.command.name}`.")
-# -----------------------------------------------------
-
+# Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
+# Definir as intenções (Intents) do bot
 intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
+intents.message_content = True  # Necessário para ler o conteúdo das mensagens
+intents.members = True          # Necessário para obter informações dos membros
 
 bot = discord.Bot(intents=intents)
 
+# Lista de cogs para carregar
 cogs_list = [
     'sales_cog',
     'admin_cog',
     'evaluation_cog',
-    'user_cog' # <-- NOVO COG
+    'user_cog'
 ]
 
+# Carregar os cogs
 for cog in cogs_list:
-    bot.load_extension(f'cogs.{cog}')
+    try:
+        bot.load_extension(f'cogs.{cog}')
+    except Exception as e:
+        print(f"Erro ao carregar o cog {cog}: {e}")
 
 @bot.event
 async def on_ready():
+    """Evento que é acionado quando o bot está online e pronto."""
     print(f'Bot conectado como {bot.user}')
     # Inicializar a conexão com o banco de dados
     try:
@@ -56,11 +43,12 @@ async def on_ready():
         print("Conexão com o banco de dados estabelecida e tabelas verificadas.")
     except Exception as e:
         print(f"ERRO: Falha ao conectar ao banco de dados: {e}")
+    
+    # Sincronizar comandos de barra com o servidor especificado
     await bot.sync_commands(guild_ids=[config.GUILD_ID])
     print('Comandos de barra sincronizados.')
 
 
-# --- IMPORTANTE: Sistema de Traceback de Erros ---
 @bot.event
 async def on_application_command_error(ctx: discord.ApplicationContext, error: discord.DiscordException):
     """Manipulador de erros global para comandos de barra."""
@@ -75,7 +63,10 @@ async def on_application_command_error(ctx: discord.ApplicationContext, error: d
         description="Ocorreu um erro inesperado ao executar este comando. A equipe de desenvolvimento já foi notificada.",
         color=discord.Color.red()
     )
-    await ctx.respond(embed=embed, ephemeral=True)
+    if not ctx.interaction.response.is_done():
+        await ctx.respond(embed=embed, ephemeral=True)
+    else:
+        await ctx.followup.send(embed=embed, ephemeral=True)
 
-
+# Iniciar o bot
 bot.run(TOKEN)
