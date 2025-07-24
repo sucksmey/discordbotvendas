@@ -1,22 +1,51 @@
 # config.py
-import discord
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# --- Conexão ---
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # --- IDs PRINCIPAIS ---
-GUILD_ID = 897650833888534588  # ID do seu servidor
+GUILD_ID = 897650833888534588
 
 # --- IDs DE CARGOS ---
-ATTENDANT_ROLE_IDS = [1385360600665686087, 1379126175317622965] # IDs dos cargos de atendente
-VIP_ROLE_ID = 1070823913308827678 # ID do cargo VIP
+ATTENDANT_ROLE_IDS = [1385360600665686087, 1379126175317622965]
+VIP_ROLE_ID = 1070823913308827678
+NEW_CUSTOMER_ROLE_ID = 897657858743758948
+EXISTING_CUSTOMER_ROLE_ID = 1380201405691727923
 
 # --- IDs DE CANAIS ---
-PURCHASE_CHANNEL_ID = 1380180725369798708      # Canal onde o botão de compra inicial aparece
-ADMIN_NOTIF_CHANNEL_ID = 1394112959436820520   # Canal para notificar admins sobre novo pedido
-ATTENDANCE_LOG_CHANNEL_ID = 1385371013226827986 # Canal para logar quem está atendendo
-DELIVERY_LOG_CHANNEL_ID = 1394349518933463193   # Canal para logar entregas
-REVIEW_CHANNEL_ID = 1380180935302975620         # Canal para enviar as avaliações
+PURCHASE_CHANNEL_ID = 1380180725369798708
+ADMIN_NOTIF_CHANNEL_ID = 1394112959436820520
+ATTENDANCE_LOG_CHANNEL_ID = 1385371013226827986
+DELIVERY_LOG_CHANNEL_ID = 1394349518933463193
+REVIEW_CHANNEL_ID = 1380180935302975620
+LOYALTY_LOG_CHANNEL_ID = 1380180609653018735 # Canal de log de fidelidade
+GENERAL_LOG_CHANNEL_ID = 1394112959436820520 # Canal para logs de DM e comandos
 
-# --- CONFIGURAÇÕES DE EMBEDS ---
-EMBED_COLOR = 0xFF69B4  # Cor rosa para as embeds
+# --- CONFIGURAÇÕES ---
+EMBED_COLOR = 0xFF69B4
+NEW_CUSTOMER_DISCOUNT_PERCENT = 3 # 3% de desconto
+
+# --- PROGRAMA DE FIDELIDADE ---
+# (Compras necessárias, Título, Descrição do Prêmio)
+LOYALTY_TIERS = [
+    (10, "Cliente Fiel 🏅", "1.000 Robux por R$35 na sua próxima compra!"),
+    (20, "Cliente Bronze II", "100 Robux grátis na sua próxima compra!"),
+    (30, "Cliente Prata 🥈", "Desconto vitalício de R$1 em pacotes acima de 500 Robux!"),
+    (40, "Cliente Prata II", "300 Robux grátis na sua próxima compra!"),
+    (50, "Cliente Ouro 🥇", "Um pacote de 1.000 Robux por R$30 (uso único)!"),
+    (60, "Cliente Diamante 💎", "Acesso ao 'Clube VIP Fidelidade' (entregas prioritárias, mimos mensais e cargo especial)!"),
+    (70, "Cliente Mestre 🔥", "Combo especial: 500 + 300 Robux por apenas R$25!"),
+    (100, "Lenda da Israbuy 🏆", "Mural dos Deuses, 1.000 Robux grátis e acesso permanente a promoções VIP!"),
+]
+
+# --- VIP ---
+VIP_PRICE = 6.00
+VIP_ROBUX_DEAL_PRICE = 36.00
+VIP_DEAL_USES_PER_MONTH = 2
 
 # --- PREÇOS ---
 # (valor em R$)
