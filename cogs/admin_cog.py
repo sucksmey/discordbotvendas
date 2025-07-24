@@ -25,46 +25,66 @@ class AdminCog(commands.Cog):
         purchase_id, purchase_count = await database.add_purchase(cliente.id, produto, valor, atendente.id, entregador.id)
         total_spent = await database.get_user_spend(cliente.id)
         
-        # --- Lógica da DM ---
-        review_view = View(timeout=None)
-        review_view.add_item(Button(
+        # --- LÓGICA DA DM CORRIGIDA ---
+        # 1. Monta os botões
+        dm_view = View(timeout=None)
+        dm_view.add_item(Button(
             label="⭐ Avaliar esta Compra",
             style=discord.ButtonStyle.success,
             custom_id=f"review_purchase_{purchase_id}"
         ))
+        # Botão que leva o usuário para o canal de compra de VIP
+        vip_channel_url = f"https://discord.com/channels/{ctx.guild.id}/{config.VIP_PURCHASE_CHANNEL_ID}"
+        dm_view.add_item(Button(
+            label="💎 Comprar VIP",
+            style=discord.ButtonStyle.link,
+            url=vip_channel_url,
+            emoji="💎"
+        ))
+
+        # 2. Monta o embed da DM
         dm_embed = discord.Embed(title="🎉 Pedido Entregue!", color=config.EMBED_COLOR)
         dm_embed.description = (
             f"Olá, {cliente.display_name}! Seu produto **({produto})** foi entregue com sucesso.\n\n"
+            f"Você pode verificar o saldo pendente em: [Roblox Transactions]({config.PENDING_ROBUX_URL})\n\n"
+            "Obrigado pela sua preferência!\n\n"
             "Sua opinião é muito importante. Por favor, clique no botão abaixo para avaliar este atendimento."
         )
-        await log_dm(self.bot, cliente, embed=dm_embed, view=review_view)
 
-        # --- NOVO EMBED DE LOG DE ENTREGA ---
+        # 3. Adiciona o benefício VIP se o cliente tiver o cargo
+        vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
+        if vip_role and vip_role in cliente.roles:
+            dm_embed.add_field(
+                name="⭐ Benefício VIP",
+                value=f"Como VIP, você pode comprar 1k de Robux por R${config.VIP_ROBUX_DEAL_PRICE:.2f} até {config.VIP_DEAL_USES_PER_MONTH}x por mês."
+            )
+        
+        # 4. Envia a DM com o embed e os botões
+        await log_dm(self.bot, cliente, embed=dm_embed, view=dm_view)
+
+        # --- EMBED DE LOG DE ENTREGA CORRIGIDO ---
         delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
         if delivery_log_channel:
-            
             log_embed = discord.Embed(
                 description=f"Obrigado, {cliente.mention}, por comprar conosco!",
-                color=0x28a745, # Verde
+                color=0x28a745,
                 timestamp=datetime.datetime.now()
             )
             log_embed.set_author(name="🛒 Nova Compra na IsraBuy!", icon_url=self.bot.user.display_avatar.url)
             log_embed.set_thumbnail(url=cliente.display_avatar.url)
 
-            # Informações da compra
             log_embed.add_field(name="Produto Comprado", value=produto, inline=False)
             log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=False)
             
-            # Informações do cliente
             compra_str = "🎉 **Esta é a primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra** do cliente."
             log_embed.add_field(name="Histórico do Cliente", value=compra_str, inline=False)
-            log_embed.add_field(name="Total Gasto na Loja", value=f"R$ {total_spent:.2f}", inline=False)
             
-            # Informações do atendimento
+            # --- CORREÇÃO DO VALOR TOTAL GASTO ---
+            log_embed.add_field(name="Total Gasto na Loja", value=f"R$ {float(total_spent):.2f}", inline=False)
+            
             log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True)
             log_embed.add_field(name="Entregue por", value=entregador.mention, inline=True)
 
-            vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
             if vip_role and vip_role in cliente.roles:
                 log_embed.add_field(name="Status", value="⭐ **Cliente VIP**", inline=False)
             
