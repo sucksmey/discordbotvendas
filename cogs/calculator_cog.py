@@ -1,52 +1,87 @@
 # cogs/calculator_cog.py
 import discord
 from discord.ext import commands
+from discord.ui import View, button
 import re
 
 import config
+
+# --- View com os botões de conversão ---
+class ConversionView(View):
+    def __init__(self, value: float, original_author_id: int):
+        super().__init__(timeout=60.0)  # Os botões desaparecerão após 60 segundos
+        self.value = value
+        self.original_author_id = original_author_id
+        self.message = None
+
+    # Garante que apenas o autor original da mensagem possa clicar nos botões
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.original_author_id:
+            await interaction.response.send_message("Você não pode interagir com os botões de outra pessoa.", ephemeral=True)
+            return False
+        return True
+
+    @button(label="Converter para Robux", style=discord.ButtonStyle.primary, emoji="💎")
+    async def to_robux_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        price_per_robux = config.ROBUX_PRICES[1000] / 1000
+        robux_amount = int(self.value / price_per_robux)
+        
+        embed = discord.Embed(title="🧮 Calculadora IsraBuy", color=config.EMBED_COLOR)
+        embed.description = f"💰 **R$ {self.value:.2f}** equivalem a aproximadamente **{robux_amount} Robux**."
+        
+        # Edita a mensagem original para mostrar apenas a resposta, removendo os botões
+        await interaction.response.edit_message(embed=embed, view=None)
+
+    @button(label="Converter para Reais", style=discord.ButtonStyle.secondary, emoji="💰")
+    async def to_brl_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
+        brl_amount = config.calculate_robux_price(int(self.value))
+
+        embed = discord.Embed(title="🧮 Calculadora IsraBuy", color=config.EMBED_COLOR)
+        embed.description = f"💎 **{int(self.value)} Robux** custam **R$ {brl_amount:.2f}**."
+
+        # Edita a mensagem original para mostrar apenas a resposta, removendo os botões
+        await interaction.response.edit_message(embed=embed, view=None)
+
+    async def on_timeout(self):
+        if self.message:
+            # Desabilita os botões na mensagem original quando o tempo esgota
+            for item in self.children:
+                item.disabled = True
+            await self.message.edit(view=self)
+
 
 class CalculatorCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     def parse_input(self, content: str):
-        """Analisa a mensagem para extrair o valor e a moeda."""
         content_lower = content.lower()
-        
-        # Identifica a moeda pela palavra-chave
         is_brl = 'reais' in content_lower or 'r$' in content_lower
         is_robux = 'robux' in content_lower
         
-        # Limpa a string para extrair apenas o número
-        # Remove pontos de milhar, substitui vírgula por ponto decimal
         cleaned_content = content.replace('.', '').replace(',', '.')
-        # Remove todas as letras e símbolos, exceto o ponto decimal
         numeric_part = re.sub(r'[^\d.]', '', cleaned_content)
         
         try:
             value = float(numeric_part)
         except (ValueError, TypeError):
-            return None, None # Retorna None se não conseguir converter para número
+            return None, None
 
         if is_brl:
             return value, 'BRL'
         if is_robux:
-            # Robux deve ser um número inteiro
             return int(value), 'ROBUX'
         
-        # Se não houver palavra-chave, trata como ambíguo
         return value, 'AMBIGUOUS'
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # Ignora mensagens do próprio bot ou de outros canais
         if message.author.bot or message.channel.id != config.CALCULATOR_CHANNEL_ID:
             return
 
         value, currency = self.parse_input(message.content)
 
         if value is None:
-            # Se a entrada for inválida (ex: "abc"), envia ajuda
             help_embed = discord.Embed(
                 title="❌ Formato Inválido",
                 description="Por favor, digite um valor no formato correto.\n\n**Exemplos:**\n`1000 robux`\n`41 reais`\n`10.50`",
@@ -58,32 +93,26 @@ class CalculatorCog(commands.Cog):
         embed = discord.Embed(title="🧮 Calculadora IsraBuy", color=config.EMBED_COLOR)
 
         if currency == 'BRL':
-            # Converte Reais para Robux
             price_per_robux = config.ROBUX_PRICES[1000] / 1000
             robux_amount = int(value / price_per_robux)
             embed.description = f"Com **R$ {value:.2f}** você pode comprar aproximadamente **{robux_amount} Robux**."
+            await message.reply(embed=embed)
 
         elif currency == 'ROBUX':
-            # Converte Robux para Reais
             brl_amount = config.calculate_robux_price(value)
             embed.description = f"**{value} Robux** custam **R$ {brl_amount:.2f}**."
+            await message.reply(embed=embed)
         
         elif currency == 'AMBIGUOUS':
-            # Se for ambíguo, mostra as duas conversões
-            # Converte o valor como se fosse Reais
-            price_per_robux = config.ROBUX_PRICES[1000] / 1000
-            robux_amount = int(value / price_per_robux)
+            # --- LÓGICA ATUALIZADA AQUI ---
+            # Em vez de mostrar as duas opções, agora pergunta ao usuário.
+            view = ConversionView(value=value, original_author_id=message.author.id)
             
-            # Converte o valor como se fosse Robux
-            brl_amount = config.calculate_robux_price(int(value))
-
-            embed.description = (
-                f"O valor `{message.content}` pode ser interpretado de duas formas:\n\n"
-                f"💰 **R$ {value:.2f}** equivalem a aprox. **{robux_amount} Robux**.\n"
-                f"💎 **{int(value)} Robux** custam **R$ {brl_amount:.2f}**."
-            )
-
-        await message.reply(embed=embed)
+            embed = discord.Embed(title="🤔 Qual moeda?", color=config.EMBED_COLOR)
+            embed.description = f"O valor `{message.content}` que você digitou é em Reais ou Robux?\n\nEscolha uma opção abaixo para converter."
+            
+            sent_message = await message.reply(embed=embed, view=view)
+            view.message = sent_message # Armazena a mensagem para poder editar no timeout
 
 
 def setup(bot):
