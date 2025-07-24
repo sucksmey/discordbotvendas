@@ -13,6 +13,7 @@ async def init_db():
     
     pool = await asyncpg.create_pool(dsn=config.DATABASE_URL)
     async with pool.acquire() as connection:
+        # Tabela de usuários
         await connection.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
@@ -21,6 +22,7 @@ async def init_db():
                 vip_purchases_this_month INTEGER DEFAULT 0
             );
         """)
+        # Tabela de compras
         await connection.execute("""
             CREATE TABLE IF NOT EXISTS purchases (
                 purchase_id SERIAL PRIMARY KEY,
@@ -33,19 +35,26 @@ async def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             );
         """)
+        # Tabela de produtos com estoque
+        await connection.execute("""
+            CREATE TABLE IF NOT EXISTS products (
+                product_id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                price NUMERIC(10, 2) NOT NULL,
+                stock INTEGER NOT NULL DEFAULT 0,
+                category TEXT NOT NULL
+            );
+        """)
 
 async def add_purchase(user_id: int, product_name: str, price: float, attendant_id: int, deliverer_id: int):
     """Adiciona uma compra ao DB, incrementa o contador e retorna o ID da nova compra e a contagem total."""
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING;", user_id)
-        
         new_purchase = await conn.fetchrow(
             "INSERT INTO purchases (user_id, product_name, price_brl, purchase_date, attendant_id, deliverer_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING purchase_id;",
             user_id, product_name, price, datetime.datetime.now(datetime.timezone.utc), attendant_id, deliverer_id
         )
-        
         user_data = await conn.fetchrow("UPDATE users SET purchase_count = purchase_count + 1 WHERE user_id = $1 RETURNING purchase_count;", user_id)
-        
         return new_purchase['purchase_id'], user_data['purchase_count']
 
 async def get_purchase_history(user_id: int):
@@ -74,3 +83,29 @@ async def get_user_spend(user_id: int):
     async with pool.acquire() as conn:
         total = await conn.fetchval("SELECT SUM(price_brl) FROM purchases WHERE user_id = $1;", user_id)
         return total if total is not None else 0
+
+# --- Funções de Produto e Estoque ---
+async def add_product(name: str, price: float, stock: int, category: str):
+    """Adiciona um novo produto ao banco de dados."""
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO products (name, price, stock, category) VALUES ($1, $2, $3, $4);", name, price, stock, category)
+
+async def get_products_by_category(category: str):
+    """Busca todos os produtos de uma categoria específica."""
+    async with pool.acquire() as conn:
+        return await conn.fetch("SELECT * FROM products WHERE category = $1 ORDER BY name ASC;", category)
+
+async def get_product_by_id(product_id: int):
+    """Busca um produto específico pelo seu ID."""
+    async with pool.acquire() as conn:
+        return await conn.fetchrow("SELECT * FROM products WHERE product_id = $1;", product_id)
+
+async def update_stock(product_id: int, quantity: int):
+    """Adiciona ou remove uma quantidade do estoque de um produto."""
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE products SET stock = stock + $1 WHERE product_id = $2;", quantity, product_id)
+        
+async def set_stock(product_id: int, quantity: int):
+    """Define o estoque de um produto para um valor exato."""
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE products SET stock = $1 WHERE product_id = $2;", quantity, product_id)
