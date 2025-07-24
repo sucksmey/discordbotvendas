@@ -4,6 +4,7 @@ from discord.ext import commands
 from discord.ui import View, Button, button
 import asyncio
 import re
+import os
 
 import config
 from utils.logger import log_command, log_dm
@@ -105,12 +106,22 @@ class InitialPurchaseView(View):
             
         await interaction.followup.send(f"Seu carrinho foi criado! Continue sua compra aqui: {thread.mention}", ephemeral=True)
         
+        # --- FIX 1: ADICIONANDO A IMAGEM DE BOAS-VINDAS ---
         welcome_embed = discord.Embed(
             title=f"👋 Olá, {user.display_name}!",
             description="Bem-vindo(a) ao seu carrinho de compras da **IsraBuy**.\n\nPara começar, por favor, me informe seu **nickname no Roblox**.",
             color=config.EMBED_COLOR
         )
-        await thread.send(user.mention, embed=welcome_embed)
+        
+        welcome_file_path = "assets/welcome.png"
+        if os.path.exists(welcome_file_path):
+            welcome_file = discord.File(welcome_file_path, filename="welcome.png")
+            welcome_embed.set_thumbnail(url="attachment://welcome.png")
+            await thread.send(user.mention, file=welcome_file, embed=welcome_embed)
+        else:
+            await thread.send(user.mention, embed=welcome_embed)
+            print("AVISO: Arquivo 'assets/welcome.png' não encontrado. Mensagem de boas-vindas enviada sem imagem.")
+
 
         def check(m):
             return m.author == user and m.channel == thread
@@ -153,7 +164,17 @@ class InitialPurchaseView(View):
             payment_embed.description = description
             payment_embed.add_field(name="Chave PIX (Aleatória)", value="b1a2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6")
 
-            await thread.send(embed=payment_embed)
+            # --- FIX 2: ADICIONANDO O QR CODE ---
+            qr_code_file_path = "assets/qrcode.png"
+            if os.path.exists(qr_code_file_path):
+                qr_code_file = discord.File(qr_code_file_path, filename="qrcode.png")
+                payment_embed.set_image(url="attachment://qrcode.png")
+                await thread.send(file=qr_code_file, embed=payment_embed)
+            else:
+                await thread.send(embed=payment_embed)
+                print("AVISO: Arquivo 'assets/qrcode.png' não encontrado. Mensagem de pagamento enviada sem QR Code.")
+
+
             msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author == user and m.channel == thread and m.attachments, timeout=600.0)
             
             await thread.send("✅ Comprovante recebido! Nossa equipe já foi notificada.")
@@ -202,7 +223,6 @@ class SalesCog(commands.Cog):
         self.bot.add_view(InitialPurchaseView(bot=self.bot))
         print("View de vendas persistente registrada.")
         
-    # COMANDO CORRIGIDO AQUI
     @commands.slash_command(
         name="iniciarvendas",
         description="Cria o painel inicial de vendas no canal de compras.",
