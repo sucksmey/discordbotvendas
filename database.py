@@ -8,6 +8,9 @@ pool = None
 async def init_db():
     """Inicializa a pool de conexões e cria as tabelas se não existirem."""
     global pool
+    if not config.DATABASE_URL:
+        raise Exception("DATABASE_URL não foi encontrada nas variáveis de ambiente.")
+    
     pool = await asyncpg.create_pool(dsn=config.DATABASE_URL)
     async with pool.acquire() as connection:
         await connection.execute("""
@@ -60,3 +63,8 @@ async def get_user_data(user_id: int):
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING;", user_id)
         return await conn.fetchrow("SELECT * FROM users WHERE user_id = $1;", user_id)
+
+async def set_vip_status(user_id: int, status: bool):
+    """Define o status VIP de um usuário."""
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO users (user_id, is_vip) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET is_vip = $2;", user_id, status)
