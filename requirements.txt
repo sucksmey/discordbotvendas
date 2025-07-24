@@ -1,2 +1,4 @@
+# requirements.txt
 py-cord==2.5.0
 python-dotenv==1.0.1
+asyncpg==0.29.0
