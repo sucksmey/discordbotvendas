@@ -5,61 +5,80 @@ from discord import option
 import datetime
 
 import config
+import database
+from utils.logger import log_dm # (Precisaremos criar este utilitário)
 
 class AdminCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.slash_command(
-        name="entregue",
-        description="Finaliza um pedido e notifica o cliente e os logs.",
-        guild_ids=[config.GUILD_ID]
-    )
-    @option("cliente", description="O cliente que recebeu o pedido.")
-    @option("entregador", description="O membro da equipe que fez a entrega.")
-    @option("atendente", description="O membro da equipe que atendeu o pedido.")
-    @option("valor", description="O valor da compra.")
+    # COMANDO /entregue ATUALIZADO
+    @commands.slash_command(name="entregue", description="Finaliza um pedido, registrando no DB e notificando o cliente.")
+    @option("cliente", discord.Member, description="O cliente que recebeu o pedido.")
+    @option("produto", str, description="O nome do produto vendido. Ex: 1000 Robux")
+    @option("valor", float, description="O valor da compra.")
+    @option("atendente", discord.Member, description="Quem atendeu o pedido.")
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
-    async def entregue(self, ctx: discord.ApplicationContext, cliente: discord.Member, entregador: discord.Member, atendente: discord.Member, valor: float):
+    async def entregue(self, ctx: discord.ApplicationContext, cliente: discord.Member, produto: str, valor: float, atendente: discord.Member):
+        entregador = ctx.author
+
+        # 1. Adicionar ao Banco de Dados
+        purchase_count = await database.add_purchase(cliente.id, produto, valor, atendente.id, entregador.id)
         
-        # 1. Enviar DM para o cliente
-        try:
-            dm_embed = discord.Embed(
-                title="🎉 Pedido Entregue!",
-                description=f"Olá, {cliente.display_name}! Seus Robux foram entregues com sucesso.\n\n"
-                            f"Você pode verificar o saldo pendente clicando no link abaixo:\n"
-                            f"[Verificar Robux Pendentes]({config.PENDING_ROBUX_URL})",
-                color=config.EMBED_COLOR
-            )
-            dm_embed.set_footer(text="Agradecemos a sua preferência!")
-            await cliente.send(embed=dm_embed)
-        except discord.Forbidden:
-            await ctx.respond("Não foi possível enviar a DM para o cliente (provavelmente estão fechadas).", ephemeral=True)
+        # 2. Enviar DM para o cliente com logs
+        dm_embed = discord.Embed(title="🎉 Pedido Entregue!", color=config.EMBED_COLOR)
+        dm_embed.description = (
+            f"Olá, {cliente.display_name}! Seu produto **({produto})** foi entregue com sucesso.\n\n"
+            f"Você pode verificar o saldo pendente de Robux em: [Roblox Transactions]({config.PENDING_ROBUX_URL})\n\n"
+            "**Obrigado pela sua preferência!**"
+        )
+        vip_role = cliente.get_role(config.VIP_ROLE_ID)
+        if vip_role:
+             dm_embed.add_field(name="⭐ Benefício VIP", value=f"Como VIP, você pode comprar 1k de Robux por R${config.VIP_ROBUX_DEAL_PRICE:.2f} até {config.VIP_DEAL_USES_PER_MONTH}x por mês.", inline=False)
 
-        # 2. Enviar log de entrega
-        log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
-        if log_channel:
-            log_embed = discord.Embed(
-                title="✅ Compra Aprovada e Entregue!",
-                color=0x28a745, # Verde sucesso
-                timestamp=datetime.datetime.now()
-            )
-            log_embed.add_field(name="Cliente", value=cliente.mention, inline=True)
-            log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=True)
-            log_embed.add_field(name="Atendido por", value=atendente.mention, inline=False)
-            log_embed.add_field(name="Entregue por", value=entregador.mention, inline=True)
-            
-            # Lógica de VIP e Fidelidade (Exemplo simples)
-            vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
-            if vip_role in cliente.roles:
-                log_embed.add_field(name="Status VIP", value="⭐ Cliente VIP!", inline=False)
+        await log_dm(self.bot, cliente, embed=dm_embed) # Função de log para DM
+
+        # 3. Enviar log de fidelidade
+        loyalty_channel = self.bot.get_channel(config.LOYALTY_LOG_CHANNEL_ID)
+        loyalty_embed = self.create_loyalty_embed(cliente, purchase_count)
+        await loyalty_channel.send(embed=loyalty_embed)
+        
+        await ctx.respond(f"O pedido de {cliente.mention} foi marcado como entregue e registrado no banco de dados!", ephemeral=True)
+
+    # NOVO COMANDO /addcompra
+    @commands.slash_command(name="addcompra", description="Adiciona manualmente uma compra antiga para um usuário.")
+    @option("cliente", discord.Member, description="O cliente que fez a compra.")
+    @option("produto", str, description="O nome do produto vendido.")
+    @option("valor", float, description="O valor da compra.")
+    @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
+    async def addcompra(self, ctx: discord.ApplicationContext, cliente: discord.Member, produto: str, valor: float):
+         await database.add_purchase(cliente.id, produto, valor, ctx.author.id, ctx.author.id)
+         await ctx.respond(f"Compra manual de '{produto}' para {cliente.mention} adicionada com sucesso.", ephemeral=True)
+
+    # NOVO COMANDO /setfidelidade
+    @commands.slash_command(name="setfidelidade", description="Define o número de compras de um usuário para o programa de fidelidade.")
+    @option("cliente", discord.Member, description="O cliente a ser modificado.")
+    @option("compras", int, description="O número total de compras.")
+    @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
+    async def setfidelidade(self, ctx: discord.ApplicationContext, cliente: discord.Member, compras: int):
+        await database.set_purchase_count(cliente.id, compras)
+        await ctx.respond(f"A contagem de compras de {cliente.mention} foi definida para **{compras}**.", ephemeral=True)
+
+
+    def create_loyalty_embed(self, user: discord.Member, count: int):
+        embed = discord.Embed(
+            title=f"🌟 Programa de Fidelidade de {user.display_name}",
+            description=f"{user.mention} tem atualmente **{count} compras verificadas**.",
+            color=config.EMBED_COLOR
+        )
+        embed.set_thumbnail(url=user.display_avatar.url)
+
+        for required, title, reward in config.LOYALTY_TIERS:
+            if count >= required:
+                embed.add_field(name=f"✅ {title}", value=reward, inline=False)
             else:
-                log_embed.add_field(name="Status VIP", value="Não é VIP. Recomende a compra do VIP para benefícios exclusivos!", inline=False)
-            
-            await log_channel.send(embed=log_embed)
-
-        await ctx.respond(f"O pedido de {cliente.mention} foi marcado como entregue com sucesso!", ephemeral=True)
-
+                embed.add_field(name=f"❌ {title}", value=reward, inline=False)
+        return embed
 
 def setup(bot):
     bot.add_cog(AdminCog(bot))
