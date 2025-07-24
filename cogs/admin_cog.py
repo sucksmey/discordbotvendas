@@ -22,18 +22,15 @@ class AdminCog(commands.Cog):
     async def entregue(self, ctx: discord.ApplicationContext, cliente: discord.Member, produto: str, valor: float, atendente: discord.Member):
         entregador = ctx.author
 
-        # 1. Adicionar ao Banco de Dados e obter o ID da compra
         purchase_id, purchase_count = await database.add_purchase(cliente.id, produto, valor, atendente.id, entregador.id)
         
-        # 2. Criar o botão de avaliação com o ID da compra
-        review_view = View(timeout=None) # Timeout None para o botão ser persistente
+        review_view = View(timeout=None)
         review_view.add_item(Button(
             label="⭐ Avaliar esta Compra",
             style=discord.ButtonStyle.success,
             custom_id=f"review_purchase_{purchase_id}"
         ))
 
-        # 3. Enviar DM para o cliente com o botão
         dm_embed = discord.Embed(title="🎉 Pedido Entregue!", color=config.EMBED_COLOR)
         dm_embed.description = (
             f"Olá, {cliente.display_name}! Seu produto **({produto})** foi entregue com sucesso.\n\n"
@@ -44,7 +41,26 @@ class AdminCog(commands.Cog):
         
         await log_dm(self.bot, cliente, embed=dm_embed, view=review_view)
 
-        # 4. Enviar log de fidelidade
+        # --- CÓDIGO DO LOG DE ENTREGA RESTAURADO AQUI ---
+        delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
+        if delivery_log_channel:
+            log_embed = discord.Embed(
+                title="✅ Compra Aprovada e Entregue!",
+                color=0x28a745,
+                timestamp=datetime.datetime.now()
+            )
+            log_embed.add_field(name="Cliente", value=cliente.mention, inline=True)
+            log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=True)
+            log_embed.add_field(name="Produto", value=produto, inline=False)
+            log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True)
+            log_embed.add_field(name="Entregue por", value=entregador.mention, inline=True)
+            
+            vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
+            if vip_role in cliente.roles:
+                log_embed.add_field(name="Status VIP", value="⭐ Cliente VIP!", inline=False)
+            
+            await delivery_log_channel.send(embed=log_embed)
+
         loyalty_channel = self.bot.get_channel(config.LOYALTY_LOG_CHANNEL_ID)
         if loyalty_channel:
             loyalty_embed = self.create_loyalty_embed(cliente, purchase_count)
@@ -81,7 +97,7 @@ class AdminCog(commands.Cog):
             await ctx.respond("Este comando só pode ser usado em um carrinho (tópico).", ephemeral=True)
             return
 
-        if not ctx.channel.name.startswith(("🛒", "🎟️", "💎")): # Aceita vários tipos de carrinho
+        if not ctx.channel.name.startswith(("🛒", "🎟️", "💎")):
             await ctx.respond("Este não parece ser um carrinho de compras válido.", ephemeral=True)
             return
             
