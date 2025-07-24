@@ -6,13 +6,13 @@ import datetime
 
 import config
 import database
-from utils.logger import log_dm # (Precisaremos criar este utilitário)
+from utils.logger import log_dm, log_command
 
 class AdminCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # COMANDO /entregue ATUALIZADO
+    # COMANDO /entregue
     @commands.slash_command(name="entregue", description="Finaliza um pedido, registrando no DB e notificando o cliente.")
     @option("cliente", discord.Member, description="O cliente que recebeu o pedido.")
     @option("produto", str, description="O nome do produto vendido. Ex: 1000 Robux")
@@ -22,10 +22,8 @@ class AdminCog(commands.Cog):
     async def entregue(self, ctx: discord.ApplicationContext, cliente: discord.Member, produto: str, valor: float, atendente: discord.Member):
         entregador = ctx.author
 
-        # 1. Adicionar ao Banco de Dados
         purchase_count = await database.add_purchase(cliente.id, produto, valor, atendente.id, entregador.id)
         
-        # 2. Enviar DM para o cliente com logs
         dm_embed = discord.Embed(title="🎉 Pedido Entregue!", color=config.EMBED_COLOR)
         dm_embed.description = (
             f"Olá, {cliente.display_name}! Seu produto **({produto})** foi entregue com sucesso.\n\n"
@@ -36,16 +34,16 @@ class AdminCog(commands.Cog):
         if vip_role:
              dm_embed.add_field(name="⭐ Benefício VIP", value=f"Como VIP, você pode comprar 1k de Robux por R${config.VIP_ROBUX_DEAL_PRICE:.2f} até {config.VIP_DEAL_USES_PER_MONTH}x por mês.", inline=False)
 
-        await log_dm(self.bot, cliente, embed=dm_embed) # Função de log para DM
+        await log_dm(self.bot, cliente, embed=dm_embed)
 
-        # 3. Enviar log de fidelidade
         loyalty_channel = self.bot.get_channel(config.LOYALTY_LOG_CHANNEL_ID)
-        loyalty_embed = self.create_loyalty_embed(cliente, purchase_count)
-        await loyalty_channel.send(embed=loyalty_embed)
+        if loyalty_channel:
+            loyalty_embed = self.create_loyalty_embed(cliente, purchase_count)
+            await loyalty_channel.send(embed=loyalty_embed)
         
-        await ctx.respond(f"O pedido de {cliente.mention} foi marcado como entregue e registrado no banco de dados!", ephemeral=True)
+        await ctx.respond(f"O pedido de {cliente.mention} foi marcado como entregue e registrado!", ephemeral=True)
 
-    # NOVO COMANDO /addcompra
+    # COMANDO /addcompra
     @commands.slash_command(name="addcompra", description="Adiciona manualmente uma compra antiga para um usuário.")
     @option("cliente", discord.Member, description="O cliente que fez a compra.")
     @option("produto", str, description="O nome do produto vendido.")
@@ -55,14 +53,50 @@ class AdminCog(commands.Cog):
          await database.add_purchase(cliente.id, produto, valor, ctx.author.id, ctx.author.id)
          await ctx.respond(f"Compra manual de '{produto}' para {cliente.mention} adicionada com sucesso.", ephemeral=True)
 
-    # NOVO COMANDO /setfidelidade
-    @commands.slash_command(name="setfidelidade", description="Define o número de compras de um usuário para o programa de fidelidade.")
+    # COMANDO /setfidelidade
+    @commands.slash_command(name="setfidelidade", description="Define o número de compras de um usuário para a fidelidade.")
     @option("cliente", discord.Member, description="O cliente a ser modificado.")
     @option("compras", int, description="O número total de compras.")
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
     async def setfidelidade(self, ctx: discord.ApplicationContext, cliente: discord.Member, compras: int):
         await database.set_purchase_count(cliente.id, compras)
         await ctx.respond(f"A contagem de compras de {cliente.mention} foi definida para **{compras}**.", ephemeral=True)
+    
+    # NOVO COMANDO /fechar
+    @commands.slash_command(
+        name="fechar",
+        description="Fecha e arquiva o carrinho de compras atual.",
+        guild_ids=[config.GUILD_ID]
+    )
+    @option("motivo", str, description="O motivo para fechar o carrinho (opcional).", required=False)
+    @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
+    async def fechar(self, ctx: discord.ApplicationContext, motivo: str = "Carrinho fechado pela equipe por inatividade."):
+        if not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond("Este comando só pode ser usado em um carrinho (tópico).", ephemeral=True)
+            return
+
+        if not ctx.channel.name.startswith("🛒-"):
+            await ctx.respond("Este não parece ser um carrinho de compras válido.", ephemeral=True)
+            return
+            
+        await ctx.respond("Fechando e arquivando este carrinho...", ephemeral=True)
+
+        close_embed = discord.Embed(
+            title="🛒 Carrinho Fechado",
+            description=f"Este carrinho foi fechado por {ctx.author.mention}.\n**Motivo:** {motivo}",
+            color=discord.Color.red()
+        )
+        try:
+            await ctx.channel.send(embed=close_embed)
+            
+            log_channel = self.bot.get_channel(config.GENERAL_LOG_CHANNEL_ID)
+            if log_channel:
+                await log_channel.send(f"🔒 O carrinho `{ctx.channel.name}` foi fechado por {ctx.author.mention}. Motivo: {motivo}")
+
+            await ctx.channel.edit(archived=True, locked=True)
+        except Exception as e:
+            print(f"Erro ao fechar o tópico: {e}")
+            await ctx.followup.send("Ocorreu um erro ao fechar o tópico.", ephemeral=True)
 
 
     def create_loyalty_embed(self, user: discord.Member, count: int):
