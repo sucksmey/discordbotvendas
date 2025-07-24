@@ -6,6 +6,7 @@ import asyncio
 import os
 
 import config
+import database
 from utils.logger import log_dm
 
 class VipPurchaseView(View):
@@ -31,7 +32,7 @@ class VipPurchaseView(View):
                         "Por favor, realize o pagamento via PIX para a chave abaixo e envie o comprovante aqui no chat.",
             color=0xFFD700 # Dourado
         )
-        embed.add_field(name="Chave PIX (Aleatória)", value="b1a2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6") # <<< TROCAR PELA SUA CHAVE REAL
+        embed.add_field(name="Chave PIX (Aleatória)", value="b1a2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6")
 
         qr_code_file_path = "assets/qrcode.png"
         if os.path.exists(qr_code_file_path):
