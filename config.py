@@ -18,6 +18,7 @@ EXISTING_CUSTOMER_ROLE_ID = 1380201405691727923
 
 # --- IDs DE CANAIS ---
 PURCHASE_CHANNEL_ID = 1380180725369798708      # Canal onde o botão de compra inicial aparece
+VIP_PURCHASE_CHANNEL_ID = 1392276801782415541 #canal do vip - edos
 ADMIN_NOTIF_CHANNEL_ID = 1394112959436820520   # Canal para notificar admins sobre novo pedido
 ATTENDANCE_LOG_CHANNEL_ID = 1385371013226827986 # Canal para logar quem está atendendo
 DELIVERY_LOG_CHANNEL_ID = 1394349518933463193   # Canal para logar entregas
