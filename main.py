@@ -24,8 +24,7 @@ cogs_list = [
     'user_cog',
     'vip_cog',
     'stock_cog',
-    'store_cog',
-    'calculator_cog'  # <-- ADICIONADO
+    'calculator_cog'
 ]
 
 for cog in cogs_list:
@@ -43,6 +42,7 @@ async def on_ready():
         print("Conexão com o banco de dados estabelecida.")
     except Exception as e:
         print(f"ERRO: Falha ao conectar ao banco de dados: {e}")
+    
     await bot.sync_commands(guild_ids=[config.GUILD_ID])
     print('Comandos de barra sincronizados.')
 
