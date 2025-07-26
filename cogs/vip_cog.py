@@ -9,140 +9,117 @@ import config
 import database
 from utils.logger import log_dm
 
-class VipPurchaseView(View):
-    def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
-
-    @discord.ui.button(label="Comprar VIP", style=discord.ButtonStyle.primary, custom_id="buy_vip", emoji="💎")
-    async def buy_vip_callback(self, button_obj: discord.ui.Button, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        user = interaction.user
-        
-        thread_name = f"💎 VIP - {user.display_name}"
-        thread = await interaction.channel.create_thread(name=thread_name, type=discord.ChannelType.private_thread)
-        await thread.add_user(user)
-
-        await interaction.followup.send(f"Seu atendimento para comprar VIP foi iniciado aqui: {thread.mention}", ephemeral=True)
-
-        embed = discord.Embed(
-            title="💎 Compra de Acesso VIP",
-            description=f"Olá, {user.mention}! Você está prestes a se tornar um membro VIP da **IsraBuy**.\n\n"
-                        f"**Valor:** `R$ {config.VIP_PRICE:.2f}`\n\n"
-                        "Por favor, realize o pagamento via PIX para a chave abaixo e envie o comprovante aqui no chat.",
-            color=0xFFD700 # Dourado
-        )
-        embed.add_field(name="Chave PIX (Aleatória)", value="b1a2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6")
-
-        qr_code_file_path = "assets/qrcode.png"
-        if os.path.exists(qr_code_file_path):
-            qr_code_file = discord.File(qr_code_file_path, filename="qrcode.png")
-            embed.set_image(url="attachment://qrcode.png")
-            await thread.send(user.mention, file=qr_code_file, embed=embed)
-        else:
-            await thread.send(user.mention, embed=embed)
-
-        try:
-            msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author == user and m.channel == thread and m.attachments, timeout=600.0)
-            
-            await thread.send("✅ Comprovante recebido! Nossa equipe já foi notificada para confirmar sua assinatura VIP.")
-
-            admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
-            admin_view = View(timeout=None)
-            admin_view.add_item(Button(label="Confirmar VIP", style=discord.ButtonStyle.success, custom_id=f"confirm_vip_{thread.id}_{user.id}"))
-            
-            admin_embed = discord.Embed(
-                title="🔔 Nova Compra de VIP!",
-                description=f"O cliente {user.mention} enviou um comprovante para a compra do VIP.",
-                color=0xFFD700
-            )
-            await admin_channel.send(embed=admin_embed, view=admin_view)
-
-        except asyncio.TimeoutError:
-            await thread.send("Sua compra de VIP expirou por inatividade.")
-            await asyncio.sleep(10)
-            await thread.edit(archived=True, locked=True)
-
 class VipCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    class VipPurchaseView(View):
+        def __init__(self, cog_instance):
+            super().__init__(timeout=None)
+            self.cog = cog_instance
+
+        @discord.ui.button(label="Comprar VIP", style=discord.ButtonStyle.primary, custom_id="buy_vip", emoji="💎")
+        async def buy_vip_callback(self, b: discord.ui.Button, i: discord.Interaction):
+            await i.response.defer(ephemeral=True)
+            u = i.user
+            
+            active_thread_id = await database.get_active_thread(u.id)
+            if active_thread_id:
+                thread = self.cog.bot.get_channel(active_thread_id)
+                if thread and not getattr(thread, 'archived', True):
+                    view = View(); view.add_item(Button(label="Ir para o Carrinho", style=discord.ButtonStyle.link, url=thread.jump_url))
+                    await i.followup.send(f"❌ Você já possui um carrinho aberto em {thread.mention}.", view=view, ephemeral=True)
+                    return
+                else:
+                    await database.set_active_thread(u.id, None)
+
+            t = await i.channel.create_thread(name=f"💎 VIP - {u.display_name}", type=discord.ChannelType.private_thread)
+            await database.set_active_thread(u.id, t.id)
+
+            await t.add_user(u)
+            try:
+                leader = await i.guild.fetch_member(config.LEADER_ID)
+                if leader: await t.add_user(leader)
+            except Exception as e: print(f"Não foi possível adicionar o líder ao tópico de VIP: {e}")
+            for role_id in config.ATTENDANT_ROLE_IDS:
+                role = i.guild.get_role(role_id)
+                if role:
+                    for member in role.members:
+                        try: await t.add_user(member)
+                        except Exception: pass
+
+            await i.followup.send(f"Seu atendimento para VIP foi iniciado aqui: {t.mention}", ephemeral=True)
+            lc = self.cog.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
+            if lc: await lc.send(f"💎 Novo carrinho de **VIP** para {u.mention}.")
+            e = discord.Embed(title="💎 Compra de Acesso VIP", description=f"Olá, {u.mention}! Você está prestes a se tornar VIP.\n\n**Valor:** `R$ {config.VIP_PRICE:.2f}`\n\nPague via PIX e envie o comprovante.", color=0xFFD700)
+            e.add_field(name="Chave PIX", value=config.PIX_KEY)
+            if os.path.exists("assets/qrcode.png"):
+                qrf = discord.File("assets/qrcode.png", "qrcode.png")
+                e.set_image(url="attachment://qrcode.png")
+                await t.send(u.mention, file=qrf, embed=e)
+            else: await t.send(u.mention, embed=e)
+            try:
+                await self.cog.bot.wait_for('message', check=lambda m: m.author == u and m.channel == t and m.attachments, timeout=172800.0)
+                customer_role = i.guild.get_role(config.EXISTING_CUSTOMER_ROLE_ID)
+                if customer_role: await u.add_roles(customer_role, reason="Enviou comprovante de VIP")
+                
+                await t.send("✅ Comprovante recebido!")
+                ac = self.cog.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
+                av = View(timeout=None)
+                av.add_item(Button(label="Confirmar VIP", style=discord.ButtonStyle.success, custom_id=f"confirm_vip_{t.id}_{u.id}"))
+                ae = discord.Embed(title="🔔 Nova Compra de VIP!", description=f"{u.mention} enviou comprovante para VIP.", color=0xFFD700)
+                await ac.send(embed=ae, view=av)
+            except asyncio.TimeoutError:
+                await t.send("Sua compra expirou."); await asyncio.sleep(5)
+                await database.set_active_thread(u.id, None)
+                await t.edit(archived=True, locked=True)
+
     @commands.Cog.listener()
     async def on_ready(self):
-        self.bot.add_view(VipPurchaseView(bot=self.bot))
+        self.bot.add_view(self.VipPurchaseView(self))
         print("View de compra de VIP registrada.")
 
-    @commands.slash_command(
-        name="iniciarvendasvip",
-        description="Cria o painel para compra do acesso VIP.",
-        guild_ids=[config.GUILD_ID]
-    )
+    @commands.slash_command(name="iniciarvendasvip", description="Cria o painel para compra do acesso VIP.", guild_ids=[config.GUILD_ID])
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
     async def start_vip_sales(self, ctx: discord.ApplicationContext):
-        embed = discord.Embed(
-            title="💎 Torne-se um Membro VIP!",
-            description=(
-                "Tenha acesso a benefícios exclusivos em nossa loja!\n\n"
-                f"✨ **Benefício Principal:** Compre pacotes de **1.000 Robux por apenas R$ {config.VIP_ROBUX_DEAL_PRICE:.2f}**, até {config.VIP_DEAL_USES_PER_MONTH}x por mês!\n"
-                "✨ **Prioridade:** Atendimento prioritário em suas compras.\n"
-                "✨ **Exclusividade:** Acesso a promoções e sorteios exclusivos para membros VIP.\n\n"
-                f"**Valor da Assinatura:** `R$ {config.VIP_PRICE:.2f}` (pagamento único)"
-            ),
-            color=0xFFD700
-        )
-        embed.set_footer(text="Clique no botão abaixo para adquirir seu acesso VIP!")
-
-        channel = self.bot.get_channel(config.VIP_PURCHASE_CHANNEL_ID)
-        if channel:
-            await channel.send(embed=embed, view=VipPurchaseView(bot=self.bot))
-            await ctx.respond("Painel de vendas VIP criado com sucesso!", ephemeral=True)
-        else:
-            await ctx.respond("Canal de compra de VIP não encontrado!", ephemeral=True)
+        e = discord.Embed(title="💎 Torne-se Membro VIP!", color=0xFFD700,
+            description=f"Tenha acesso a benefícios exclusivos!\n\n✨ **Benefício Principal:** Compre **1.000 Robux por R$ {config.VIP_ROBUX_DEAL_PRICE:.2f}**, até {config.VIP_DEAL_USES_PER_MONTH}x por mês!\n✨ **Prioridade no Atendimento**\n✨ **Promoções Exclusivas**\n\n**Valor:** `R$ {config.VIP_PRICE:.2f}` (pagamento único)")
+        e.set_footer(text="Clique no botão abaixo para adquirir!")
+        c = self.bot.get_channel(config.VIP_PURCHASE_CHANNEL_ID)
+        if c:
+            await c.send(embed=e, view=self.VipPurchaseView(self))
+            await ctx.respond("Painel VIP criado!", ephemeral=True)
+        else: await ctx.respond("Canal de compra VIP não encontrado!", ephemeral=True)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
-        custom_id = interaction.data.get("custom_id", "")
-        if custom_id.startswith("confirm_vip_"):
-            user_roles = [role.id for role in interaction.user.roles]
-            if not any(role_id in config.ATTENDANT_ROLE_IDS for role_id in user_roles):
-                return await interaction.response.send_message("Você não tem permissão para confirmar VIP.", ephemeral=True)
-
-            await interaction.response.defer()
-            
-            parts = custom_id.split("_")
-            thread_id, user_id = int(parts[2]), int(parts[3])
+        cid = interaction.data.get("custom_id", "")
+        if cid.startswith("confirm_vip_"):
+            if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
+                return await interaction.response.send_message("Sem permissão.", ephemeral=True)
             
             admin = interaction.user
-            member = interaction.guild.get_member(user_id)
-            thread = self.bot.get_channel(thread_id)
-            
-            vip_role = interaction.guild.get_role(config.VIP_ROLE_ID)
+            if admin.id == config.PASSIVA_ID:
+                await interaction.response.send_message("passiva não atende", ephemeral=True)
+                return
 
-            if member and vip_role:
-                await member.add_roles(vip_role, reason=f"VIP ativado por {admin.display_name}")
-                await database.set_vip_status(member.id, True)
-
-                confirm_embed = discord.Embed(
-                    title="💎 VIP Ativado!",
-                    description=f"Parabéns, {member.mention}! Seu acesso VIP foi ativado por {admin.mention}. Aproveite seus novos benefícios!",
-                    color=0xFFD700
-                )
-                if thread:
-                    await thread.send(embed=confirm_embed)
-                
-                dm_embed = discord.Embed(
-                    title="🎉 Bem-vindo(a) ao Clube VIP!",
-                    description="Sua assinatura VIP foi ativada com sucesso. Você já pode usufruir de todos os benefícios exclusivos da IsraBuy!",
-                    color=0xFFD700
-                )
-                await log_dm(self.bot, member, embed=dm_embed)
+            await interaction.response.defer()
+            p = cid.split("_")
+            tid, uid = int(p[2]), int(p[3])
+            mem, t = interaction.guild.get_member(uid), self.bot.get_channel(tid)
             
-            original_message = await interaction.original_response()
-            await original_message.edit(content=f"VIP confirmado para {member.mention} por {admin.mention}!", view=None)
+            await database.set_active_thread(uid, None)
             
-            if thread:
-                await asyncio.sleep(5)
-                await thread.edit(archived=True, locked=True)
+            vr = interaction.guild.get_role(config.VIP_ROLE_ID)
+            if mem and vr:
+                await mem.add_roles(vr, reason=f"VIP ativado por {admin.display_name}")
+                await database.set_vip_status(mem.id, True)
+                ce = discord.Embed(title="💎 VIP Ativado!", description=f"Parabéns, {mem.mention}! Seu VIP foi ativado por {admin.mention}.", color=0xFFD700)
+                if t: await t.send(embed=ce)
+                de = discord.Embed(title="🎉 Bem-vindo(a) ao Clube VIP!", description="Sua assinatura VIP foi ativada com sucesso!", color=0xFFD700)
+                await log_dm(self.bot, mem, embed=de)
+            await (await interaction.original_response()).edit(content=f"VIP confirmado para {mem.mention} por {admin.mention}!", view=None)
+            if t: await asyncio.sleep(5); await t.edit(archived=True, locked=True)
 
 def setup(bot):
     bot.add_cog(VipCog(bot))
