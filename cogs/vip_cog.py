@@ -98,27 +98,22 @@ class VipCog(commands.Cog):
             if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
                 return await interaction.response.send_message("Sem permissão.", ephemeral=True)
             
-            admin = interaction.user
-            if admin.id == config.PASSIVA_ID:
-                await interaction.response.send_message("passiva não atende", ephemeral=True)
-                return
-
             await interaction.response.defer()
             p = cid.split("_")
             tid, uid = int(p[2]), int(p[3])
-            mem, t = interaction.guild.get_member(uid), self.bot.get_channel(tid)
+            adm, mem, t = interaction.user, interaction.guild.get_member(uid), self.bot.get_channel(tid)
             
             await database.set_active_thread(uid, None)
             
             vr = interaction.guild.get_role(config.VIP_ROLE_ID)
             if mem and vr:
-                await mem.add_roles(vr, reason=f"VIP ativado por {admin.display_name}")
+                await mem.add_roles(vr, reason=f"VIP ativado por {adm.display_name}")
                 await database.set_vip_status(mem.id, True)
-                ce = discord.Embed(title="💎 VIP Ativado!", description=f"Parabéns, {mem.mention}! Seu VIP foi ativado por {admin.mention}.", color=0xFFD700)
+                ce = discord.Embed(title="💎 VIP Ativado!", description=f"Parabéns, {mem.mention}! Seu VIP foi ativado por {adm.mention}.", color=0xFFD700)
                 if t: await t.send(embed=ce)
                 de = discord.Embed(title="🎉 Bem-vindo(a) ao Clube VIP!", description="Sua assinatura VIP foi ativada com sucesso!", color=0xFFD700)
                 await log_dm(self.bot, mem, embed=de)
-            await (await interaction.original_response()).edit(content=f"VIP confirmado para {mem.mention} por {admin.mention}!", view=None)
+            await (await interaction.original_response()).edit(content=f"VIP confirmado para {mem.mention} por {adm.mention}!", view=None)
             if t: await asyncio.sleep(5); await t.edit(archived=True, locked=True)
 
 def setup(bot):
