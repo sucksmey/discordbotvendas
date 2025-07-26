@@ -113,6 +113,10 @@ class SalesCog(commands.Cog):
         await database.set_active_thread(user.id, thread.id)
         
         await thread.add_user(user)
+        try:
+            leader = await interaction.guild.fetch_member(config.LEADER_ID)
+            if leader: await thread.add_user(leader)
+        except Exception as e: print(f"Não foi possível adicionar o líder ao tópico: {e}")
         for role_id in config.ATTENDANT_ROLE_IDS:
             role = interaction.guild.get_role(role_id)
             if role:
@@ -184,6 +188,10 @@ class SalesCog(commands.Cog):
         await database.set_active_thread(user.id, thread.id)
         
         await thread.add_user(user)
+        try:
+            leader = await interaction.guild.fetch_member(config.LEADER_ID)
+            if leader: await thread.add_user(leader)
+        except Exception as e: print(f"Não foi possível adicionar o líder ao tópico: {e}")
         for role_id in config.ATTENDANT_ROLE_IDS:
             role = interaction.guild.get_role(role_id)
             if role:
@@ -243,10 +251,15 @@ class SalesCog(commands.Cog):
             if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
                 return await interaction.response.send_message("Você não tem permissão para atender este pedido.", ephemeral=True)
             
+            attendant = interaction.user
+            if attendant.id == config.PASSIVA_ID:
+                await interaction.response.send_message("passiva não atende", ephemeral=True)
+                return # Impede que a interação continue para não dar erro de "já respondido"
+
             await interaction.response.defer()
             parts = custom_id.split("_")
             thread_id, user_id = int(parts[2]), int(parts[3])
-            attendant, user = interaction.user, self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             
             await log_dm(self.bot, attendant, content="Você assumiu um novo ticket! Use o site abaixo para calcular a taxa da Gamepass (marcando 'Robux After Tax'):\nhttps://rbxtax.com/tax.html")
             
