@@ -36,30 +36,36 @@ async def set_active_thread(user_id: int, thread_id: int | None):
         await c.execute("UPDATE users SET active_thread_id = $1 WHERE user_id = $2;", thread_id, user_id)
 
 async def add_purchase(user_id: int, product_name: str, price: float, attendant_id: int, deliverer_id: int | None):
+    """Adiciona uma compra ao DB, convertendo o valor para centavos."""
     async with pool.acquire() as c:
+        # CORREÇÃO: Salva o valor multiplicado por 100 para evitar erros de ponto flutuante.
+        price_in_cents = int(price * 100)
         return await c.fetchval(
             "INSERT INTO purchases (user_id, product_name, price_brl, purchase_date, attendant_id, deliverer_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING purchase_id;",
-            user_id, product_name, price, datetime.datetime.now(datetime.timezone.utc), attendant_id, deliverer_id
+            user_id, product_name, price_in_cents, datetime.datetime.now(datetime.timezone.utc), attendant_id, deliverer_id
         )
 
 async def get_user_spend_and_count(user_id: int):
+    """Retorna o total gasto e a contagem de compras, convertendo o valor de volta para Reais."""
     async with pool.acquire() as c:
         data = await c.fetchrow("SELECT SUM(price_brl) as total, COUNT(purchase_id) as count FROM purchases WHERE user_id = $1;", user_id)
-        total = data['total'] if data and data['total'] is not None else 0
+        total_in_cents = data['total'] if data and data['total'] is not None else 0
         count = data['count'] if data and data['count'] is not None else 0
-        return float(total), count
+        # CORREÇÃO: Divide o valor por 100 para obter o valor correto em Reais.
+        return float(total_in_cents / 100), count
 
 async def get_purchase_history(user_id: int):
+    """Retorna o histórico de compras, convertendo os valores de volta para Reais."""
     async with pool.acquire() as c:
-        return await c.fetch("SELECT product_name, price_brl, purchase_date FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC;", user_id)
+        # CORREÇÃO: Divide o valor por 100 diretamente na query SQL.
+        return await c.fetch("SELECT product_name, (price_brl / 100.0) as price_brl, purchase_date FROM purchases WHERE user_id = $1 ORDER BY purchase_date DESC;", user_id)
 
-# --- NOVAS FUNÇÕES ---
 async def get_pending_purchase(user_id: int):
     """Busca a última compra pendente de um usuário (sem entregador)."""
     async with pool.acquire() as c:
         return await c.fetchrow("SELECT * FROM purchases WHERE user_id = $1 AND deliverer_id IS NULL ORDER BY purchase_date DESC LIMIT 1;", user_id)
 
-async def update_purchase_delivery(purchase_id: int, deliverer_id: int):
-    """Atualiza a compra com o ID do entregador."""
+async def update_purchase_delivery(purchase_id: int, deliverer_id: int, attendant_id: int):
+    """Atualiza a compra com o ID do entregador e do atendente final."""
     async with pool.acquire() as c:
-        await c.execute("UPDATE purchases SET deliverer_id = $1 WHERE purchase_id = $2;", deliverer_id, purchase_id)
+        await c.execute("UPDATE purchases SET deliverer_id = $1, attendant_id = $2 WHERE purchase_id = $3;", deliverer_id, attendant_id, purchase_id)
