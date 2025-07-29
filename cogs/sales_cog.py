@@ -4,7 +4,6 @@ from discord.ext import commands
 from discord.ui import View, Button, Modal, InputText
 import asyncio
 import re
-import os
 
 import config
 import database
@@ -141,12 +140,10 @@ class SalesCog(commands.Cog):
         embed.add_field(name="Nickname", value=f"`{nickname}`").add_field(name="Robux", value=f"`{amount}`").add_field(name="Valor a Pagar", value=f"**R$ {price:.2f}**")
         embed.add_field(name="Chave PIX", value=config.PIX_KEY, inline=False)
         
-        # --- CÓDIGO DO QR CODE CORRIGIDO E ADICIONADO AQUI ---
         qr_code_file = None
         if os.path.exists("assets/qrcode.png"):
             qr_code_file = discord.File("assets/qrcode.png", filename="qrcode.png")
             embed.set_image(url="attachment://qrcode.png")
-        
         await thread.send(user.mention, embed=embed, file=qr_code_file)
 
         try:
@@ -156,40 +153,17 @@ class SalesCog(commands.Cog):
                 initial_role = interaction.guild.get_role(config.INITIAL_BUYER_ROLE_ID)
                 if initial_role: await user.add_roles(initial_role)
 
-            await thread.edit(name=f"🛒 {amount} Robux - {nickname} - Aguardando Entrega")
-
-            approved_embed = discord.Embed(title="✅ Pagamento Aprovado!", color=0x28a745, description="Seu pagamento foi aprovado! Confira as informações da sua compra.")
-            approved_embed.add_field(name="Nome no Roblox", value=nickname).add_field(name="Valor em Robux", value=str(amount)).add_field(name="Valor em Reais", value=f"R$ {price:.2f}")
-            approved_embed.add_field(name="Entrega", value="Sua compra será entregue em até 72 Horas Úteis.")
+            approved_embed = discord.Embed(title="✅ Pagamento Recebido!", color=0x28a745, description="Seu pagamento foi recebido e está sendo analisado. Um atendente já foi notificado para assumir seu carrinho!")
             await thread.send(embed=approved_embed)
             
-            delivery_channel = self.bot.get_channel(config.AWAITING_DELIVERY_CHANNEL_ID)
-            if delivery_channel: await delivery_channel.send(f"⏳ {user.mention} (`{nickname}`) aguarda a entrega de **{amount} Robux**.")
+            # --- LÓGICA DO BOTÃO "ATENDER PEDIDO" RESTAURADA ---
+            admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
+            if admin_channel:
+                admin_view = View(timeout=None)
+                admin_view.add_item(Button(label="Atender Pedido", style=discord.ButtonStyle.success, custom_id=f"attend_order_{thread.id}_{user.id}"))
+                await admin_channel.send(f"🛒 O cliente {user.mention} enviou o comprovante no carrinho `{thread.name}`. Clique para atender!", view=admin_view)
             
-            purchase_id = await database.add_purchase(user.id, f"{amount} Robux", price, self.bot.user.id, None)
-
-            total_spent, _ = await database.get_user_spend_and_count(user.id)
-            if isinstance(user, discord.Member): await self.update_spend_roles(user, total_spent)
-            
-            delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
-            if delivery_log_channel:
-                _, purchase_count = await database.get_user_spend_and_count(user.id)
-                log_embed = discord.Embed(description=f"Obrigado, {user.mention}, por comprar conosco!", color=0x28a745, timestamp=datetime.datetime.now())
-                log_embed.set_author(name="🛒 Nova Compra (Aprovada Automaticamente)!", icon_url=self.bot.user.display_avatar.url)
-                log_embed.set_thumbnail(url=user.display_avatar.url)
-                log_embed.add_field(name="Produto Comprado", value=f"{amount} Robux").add_field(name="Valor Pago", value=f"R$ {price:.2f}")
-                compra_str = "🎉 **Primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra**."
-                log_embed.add_field(name="Histórico", value=compra_str).add_field(name="Total Gasto", value=f"R$ {total_spent:.2f}")
-                log_embed.add_field(name="Atendido por", value=self.bot.user.mention, inline=True)
-                await delivery_log_channel.send(embed=log_embed)
-
-            follow_up_channel = self.bot.get_channel(config.FOLLOW_UP_CHANNEL_ID)
-            if follow_up_channel:
-                follow_up_view = View(timeout=None)
-                follow_up_view.add_item(Button(label="Iniciar Acompanhamento", style=discord.ButtonStyle.primary, custom_id=f"follow_up_{user.id}"))
-                await follow_up_channel.send(f"Compra de {user.mention} aprovada. Um entregador precisa iniciar o acompanhamento.", view=follow_up_view)
-
-            await thread.send("Obrigado! A entrega é via Gamepass. Para continuar, envie o link do seu jogo/passe. Um atendente irá te guiar.")
+            await thread.send("Obrigado! A entrega é via Gamepass. Por favor, aguarde um atendente que irá te guiar com os próximos passos.")
 
         except asyncio.TimeoutError:
             await thread.send("Seu pedido expirou por inatividade."); await asyncio.sleep(5)
