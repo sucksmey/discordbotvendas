@@ -4,6 +4,7 @@ from discord.ext import commands
 from discord.ui import View, Button, Modal, InputText
 import asyncio
 import re
+import datetime
 
 import config
 import database
@@ -127,11 +128,13 @@ class SalesCog(commands.Cog):
             role = interaction.guild.get_role(role_id)
             if role: users_to_add.update(role.members)
         for u in users_to_add:
-            if u: await thread.add_user(u)
+            if u: 
+                try: await thread.add_user(u)
+                except: pass
         
         view = View(); view.add_item(Button(label="Ver seu Carrinho", style=discord.ButtonStyle.link, url=thread.jump_url))
         await interaction.followup.send(f"✅ Carrinho criado! Continue aqui: {thread.mention}", view=view, ephemeral=True)
-        await log_dm(self.bot, user, content=f"Seu carrinho foi aberto. Clique para acessar.", view=view)
+        await log_dm(self.bot, user, content=f"Seu carrinho na IsraBuy foi aberto.", view=view)
 
         price = config.calculate_robux_price(amount)
         embed = discord.Embed(title="✅ Pedido Iniciado", description="Para continuar, pague e envie o comprovante aqui.", color=config.EMBED_COLOR)
@@ -142,6 +145,7 @@ class SalesCog(commands.Cog):
         try:
             msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author.id == user.id and m.channel.id == thread.id and m.attachments, timeout=172800.0)
             
+            # --- INÍCIO DA AUTOMAÇÃO PÓS-COMPROVANTE ---
             if isinstance(user, discord.Member):
                 initial_role = interaction.guild.get_role(config.INITIAL_BUYER_ROLE_ID)
                 if initial_role: await user.add_roles(initial_role)
@@ -156,14 +160,22 @@ class SalesCog(commands.Cog):
             delivery_channel = self.bot.get_channel(config.AWAITING_DELIVERY_CHANNEL_ID)
             if delivery_channel: await delivery_channel.send(f"⏳ {user.mention} (`{nickname}`) aguarda a entrega de **{amount} Robux**.")
             
-            purchase_id = await database.add_purchase(user.id, f"{amount} Robux", price, self.bot.user.id, None)
+            await database.add_purchase(user.id, f"{amount} Robux", price, self.bot.user.id, None)
 
-            total_spent, _ = await database.get_user_spend_and_count(user.id)
+            total_spent, purchase_count = await database.get_user_spend_and_count(user.id)
             if isinstance(user, discord.Member): await self.update_spend_roles(user, total_spent)
             
-            review_view = View(timeout=None); review_view.add_item(Button(label="⭐ Avaliar Compra", style=discord.ButtonStyle.success, custom_id=f"review_purchase_{purchase_id}"))
-            await log_dm(self.bot, user, content="Sua compra foi aprovada! Quando receber, por favor, nos avalie.", view=review_view)
-            await thread.send("Após a entrega ser concluída, por favor, deixe sua avaliação clicando no botão abaixo!", view=review_view)
+            # LOG DE COMPRA AUTOMÁTICO
+            log_delivery_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
+            if log_delivery_channel:
+                log_embed = discord.Embed(description=f"Obrigado, {user.mention}, por comprar conosco!", color=0x28a745, timestamp=datetime.datetime.now())
+                log_embed.set_author(name="🛒 Nova Compra (Aprovada Automaticamente)!", icon_url=self.bot.user.display_avatar.url)
+                log_embed.set_thumbnail(url=user.display_avatar.url)
+                log_embed.add_field(name="Produto Comprado", value=f"{amount} Robux").add_field(name="Valor Pago", value=f"R$ {price:.2f}")
+                compra_str = "🎉 **Primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra**."
+                log_embed.add_field(name="Histórico", value=compra_str).add_field(name="Total Gasto", value=f"R$ {total_spent:.2f}")
+                log_embed.add_field(name="Atendido por", value=self.bot.user.mention, inline=True)
+                await log_delivery_channel.send(embed=log_embed)
 
             follow_up_channel = self.bot.get_channel(config.FOLLOW_UP_CHANNEL_ID)
             if follow_up_channel:
