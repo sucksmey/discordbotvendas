@@ -48,7 +48,11 @@ class VipCog(commands.Cog):
                     except Exception as e:
                         print(f"Não foi possível adicionar o usuário {member_to_add.id} ao tópico de VIP: {e}")
 
-            await i.followup.send(f"Seu atendimento para VIP foi iniciado aqui: {t.mention}", ephemeral=True)
+            try:
+                await i.followup.send(f"Seu atendimento para VIP foi iniciado aqui: {t.mention}", ephemeral=True)
+            except Exception as e:
+                print(f"Falha ao enviar followup de VIP: {e}")
+            
             lc = self.cog.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
             if lc: await lc.send(f"💎 Novo carrinho de **VIP** para {u.mention}.")
             e = discord.Embed(title="💎 Compra de Acesso VIP", description=f"Olá, {u.mention}! Você está prestes a se tornar VIP.\n\n**Valor:** `R$ {config.VIP_PRICE:.2f}`\n\nPague via PIX e envie o comprovante.", color=0xFFD700)
