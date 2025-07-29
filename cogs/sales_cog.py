@@ -4,6 +4,8 @@ from discord.ext import commands
 from discord.ui import View, Button, Modal, InputText
 import asyncio
 import re
+import os
+import datetime
 
 import config
 import database
@@ -146,24 +148,50 @@ class SalesCog(commands.Cog):
             embed.set_image(url="attachment://qrcode.png")
         await thread.send(user.mention, embed=embed, file=qr_code_file)
 
+        # Envia notificação para os atendentes assumirem
+        admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
+        if admin_channel:
+            admin_view = View(timeout=None)
+            admin_view.add_item(Button(label="Atender Pedido", style=discord.ButtonStyle.success, custom_id=f"attend_order_{thread.id}_{user.id}"))
+            await admin_channel.send(f"🛒 Novo carrinho de **Robux** para {user.mention} (`{nickname}`) foi aberto e aguarda um atendente.", view=admin_view)
+
         try:
             msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author.id == user.id and m.channel.id == thread.id and m.attachments, timeout=172800.0)
             
+            # --- INÍCIO DA AUTOMAÇÃO PÓS-COMPROVANTE ---
             if isinstance(user, discord.Member):
                 initial_role = interaction.guild.get_role(config.INITIAL_BUYER_ROLE_ID)
                 if initial_role: await user.add_roles(initial_role)
 
-            approved_embed = discord.Embed(title="✅ Pagamento Recebido!", color=0x28a745, description="Seu pagamento foi recebido e está sendo analisado. Um atendente já foi notificado para assumir seu carrinho!")
+            await thread.edit(name=f"🛒 {amount} Robux - {nickname} - Aguardando Entrega")
+
+            approved_embed = discord.Embed(title="✅ Pagamento Recebido!", color=0x28a745, description="Seu comprovante foi recebido! Nossa equipe já está analisando.")
             await thread.send(embed=approved_embed)
             
-            # --- LÓGICA DO BOTÃO "ATENDER PEDIDO" RESTAURADA ---
-            admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
-            if admin_channel:
-                admin_view = View(timeout=None)
-                admin_view.add_item(Button(label="Atender Pedido", style=discord.ButtonStyle.success, custom_id=f"attend_order_{thread.id}_{user.id}"))
-                await admin_channel.send(f"🛒 O cliente {user.mention} enviou o comprovante no carrinho `{thread.name}`. Clique para atender!", view=admin_view)
+            # Salva a compra no banco de dados
+            await database.add_purchase(user.id, f"{amount} Robux", price, self.bot.user.id, None)
+            total_spent, purchase_count = await database.get_user_spend_and_count(user.id)
+            if isinstance(user, discord.Member): await self.update_spend_roles(user, total_spent)
             
-            await thread.send("Obrigado! A entrega é via Gamepass. Por favor, aguarde um atendente que irá te guiar com os próximos passos.")
+            # Envia o log de compra para o canal de entregas
+            delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
+            if delivery_log_channel:
+                log_embed = discord.Embed(description=f"Obrigado, {user.mention}, por comprar conosco!", color=0x28a745, timestamp=datetime.datetime.now())
+                log_embed.set_author(name="🛒 Nova Compra na IsraBuy!", icon_url=self.bot.user.display_avatar.url)
+                log_embed.set_thumbnail(url=user.display_avatar.url)
+                log_embed.add_field(name="Produto Comprado", value=f"{amount} Robux").add_field(name="Valor Pago", value=f"R$ {price:.2f}")
+                compra_str = "🎉 **Primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra**."
+                log_embed.add_field(name="Histórico", value=compra_str).add_field(name="Total Gasto", value=f"R$ {total_spent:.2f}")
+                await delivery_log_channel.send(embed=log_embed)
+
+            # Envia o tutorial da Gamepass com botão
+            tutorial_view = View()
+            tutorial_view.add_item(Button(label="Ver Tutorial em Vídeo", style=discord.ButtonStyle.link, url=config.TUTORIAL_VIDEO_URL, emoji="🎥"))
+            await thread.send(
+                "Obrigado! A entrega é via Gamepass e pode levar de 5 a 7 dias para cair na sua conta após a entrega. "
+                "Por favor, crie sua Gamepass e aguarde um atendente te guiar com os próximos passos.",
+                view=tutorial_view
+            )
 
         except asyncio.TimeoutError:
             await thread.send("Seu pedido expirou por inatividade."); await asyncio.sleep(5)
