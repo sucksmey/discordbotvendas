@@ -97,7 +97,11 @@ class StoreCog(commands.Cog):
                 except Exception as e:
                     print(f"Não foi possível adicionar o usuário {u.id} ao tópico da loja: {e}")
 
-        await interaction.edit_original_response(content=f"Seu carrinho foi criado aqui: {thread.mention}", view=None)
+        try:
+            await interaction.edit_original_response(content=f"Seu carrinho foi criado aqui: {thread.mention}", view=None)
+        except Exception as e:
+            print(f"Falha ao editar resposta original da loja: {e}")
+
         log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
         if log_channel:
             await log_channel.send(f"🛍️ Novo carrinho de **Item ({product['name']})** criado para {user.mention}.")
