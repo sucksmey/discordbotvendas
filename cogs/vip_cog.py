@@ -36,17 +36,17 @@ class VipCog(commands.Cog):
             t = await i.channel.create_thread(name=f"💎 VIP - {u.display_name}", type=discord.ChannelType.private_thread)
             await database.set_active_thread(u.id, t.id)
 
-            await t.add_user(u)
-            try:
-                leader = await i.guild.fetch_member(config.LEADER_ID)
-                if leader: await t.add_user(leader)
-            except Exception as e: print(f"Não foi possível adicionar o líder ao tópico de VIP: {e}")
+            users_to_add = {u, await i.guild.fetch_member(config.LEADER_ID)}
             for role_id in config.ATTENDANT_ROLE_IDS:
                 role = i.guild.get_role(role_id)
-                if role:
-                    for member in role.members:
-                        try: await t.add_user(member)
-                        except Exception: pass
+                if role: users_to_add.update(role.members)
+            for member_to_add in users_to_add:
+                if member_to_add:
+                    try: 
+                        await t.add_user(member_to_add)
+                        await asyncio.sleep(0.5)
+                    except Exception as e:
+                        print(f"Não foi possível adicionar o usuário {member_to_add.id} ao tópico de VIP: {e}")
 
             await i.followup.send(f"Seu atendimento para VIP foi iniciado aqui: {t.mention}", ephemeral=True)
             lc = self.cog.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
@@ -60,7 +60,7 @@ class VipCog(commands.Cog):
             else: await t.send(u.mention, embed=e)
             try:
                 await self.cog.bot.wait_for('message', check=lambda m: m.author == u and m.channel == t and m.attachments, timeout=172800.0)
-                customer_role = i.guild.get_role(config.EXISTING_CUSTOMER_ROLE_ID)
+                customer_role = i.guild.get_role(config.INITIAL_BUYER_ROLE_ID)
                 if customer_role: await u.add_roles(customer_role, reason="Enviou comprovante de VIP")
                 
                 await t.send("✅ Comprovante recebido!")
