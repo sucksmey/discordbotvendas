@@ -28,43 +28,51 @@ class AdminCog(commands.Cog):
                 role_to_add = member.guild.get_role(highest_role_to_add)
                 if role_to_add: await member.add_roles(role_to_add, reason=f"Atingiu R$ {total_spent:.2f} em gastos")
 
-    # --- COMANDO /entregue TOTALMENTE REFEITO ---
-    @commands.slash_command(name="entregue", description="[Equipe] Confirma a entrega de um pedido pendente e pede avaliação.")
+    @commands.slash_command(name="entregue", description="[Equipe] Finaliza uma entrega e pede a avaliação do cliente.")
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
     @option("cliente", discord.Member, description="O cliente que recebeu o pedido.")
-    async def entregue(self, ctx: discord.ApplicationContext, cliente: discord.Member):
+    @option("atendente", discord.Member, description="O atendente que cuidou do ticket (pode ser você).")
+    async def entregue(self, ctx: discord.ApplicationContext, cliente: discord.Member, atendente: discord.Member):
         entregador = ctx.author
-
-        # 1. Busca a compra pendente no banco de dados
+        
         pending_purchase = await database.get_pending_purchase(cliente.id)
         if not pending_purchase:
-            return await ctx.respond(f"❌ Não encontrei nenhuma compra pendente para {cliente.mention}. A compra já pode ter sido finalizada.", ephemeral=True)
+            return await ctx.respond(f"❌ Não encontrei compra pendente para {cliente.mention}.", ephemeral=True)
 
         purchase_id = pending_purchase['purchase_id']
         produto = pending_purchase['product_name']
+        valor = float(pending_purchase['price_brl']) / 100.0
 
-        # 2. Atualiza a compra com o ID do entregador
-        await database.update_purchase_delivery(purchase_id, entregador.id)
+        await database.update_purchase_delivery(purchase_id, entregador.id, atendente.id)
         await database.set_active_thread(cliente.id, None)
 
-        # 3. Envia o pedido de avaliação para o cliente (DM e Tópico)
-        review_view = View(timeout=None)
-        review_view.add_item(Button(label="⭐ Avaliar esta Compra", style=discord.ButtonStyle.success, custom_id=f"review_purchase_{purchase_id}"))
-        await log_dm(self.bot, cliente, content=f"Sua entrega de **{produto}** foi concluída! Agradecemos a preferência. Por favor, deixe sua avaliação.", view=review_view)
-        
-        # Envia também no canal do ticket, se o comando for usado lá
+        review_view = View(timeout=None); review_view.add_item(Button(label="⭐ Avaliar esta Compra", style=discord.ButtonStyle.success, custom_id=f"review_purchase_{purchase_id}"))
+        await log_dm(self.bot, cliente, content=f"Sua entrega de **{produto}** foi concluída! Agradecemos a preferência.", view=review_view)
         if isinstance(ctx.channel, discord.Thread):
             await ctx.channel.send("A entrega foi finalizada! Por favor, deixe sua avaliação clicando no botão abaixo!", view=review_view)
 
-        # 4. Envia o botão de "Iniciar Acompanhamento"
+        total_spent, purchase_count = await database.get_user_spend_and_count(cliente.id)
+        await self.update_user_roles_by_spend(cliente, total_spent)
+
+        delivery_log_channel = self.bot.get_channel(config.DELIVERY_LOG_CHANNEL_ID)
+        if delivery_log_channel:
+            log_embed = discord.Embed(description=f"Obrigado, {cliente.mention}, por comprar conosco!", color=0x28a745, timestamp=datetime.datetime.now())
+            log_embed.set_author(name="🛒 Compra Finalizada na IsraBuy!", icon_url=self.bot.user.display_avatar.url)
+            log_embed.set_thumbnail(url=cliente.display_avatar.url)
+            log_embed.add_field(name="Produto Comprado", value=produto, inline=False)
+            log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=False)
+            compra_str = "🎉 **Primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra**."
+            log_embed.add_field(name="Histórico", value=compra_str).add_field(name="Total Gasto", value=f"R$ {total_spent:.2f}")
+            log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True).add_field(name="Entregue por", value=entregador.mention, inline=True)
+            await delivery_log_channel.send(embed=log_embed)
+        
         follow_up_channel = self.bot.get_channel(config.FOLLOW_UP_CHANNEL_ID)
         if follow_up_channel:
             follow_up_view = View(timeout=None)
             follow_up_view.add_item(Button(label="Iniciar Acompanhamento", style=discord.ButtonStyle.primary, custom_id=f"follow_up_{cliente.id}"))
-            await follow_up_channel.send(f"Entrega para {cliente.mention} finalizada por {entregador.mention}. Iniciar acompanhamento até o crédito cair na conta.", view=follow_up_view)
-        
-        await ctx.respond(f"✅ Entrega para {cliente.mention} finalizada com sucesso! O cliente foi notificado para avaliar.", ephemeral=True)
+            await follow_up_channel.send(f"Entrega para {cliente.mention} finalizada. Iniciar acompanhamento.", view=follow_up_view)
 
+        await ctx.respond(f"✅ Entrega para {cliente.mention} finalizada! Pedido de avaliação enviado.", ephemeral=True)
 
     @commands.slash_command(name="addcompra", description="[LEGADO] Adiciona uma compra antiga e atualiza os cargos.")
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
@@ -72,11 +80,10 @@ class AdminCog(commands.Cog):
     @option("produto", str, description="O nome do produto vendido.")
     @option("valor", float, description="O valor da compra.")
     async def addcompra(self, ctx: discord.ApplicationContext, cliente: discord.Member, produto: str, valor: float):
-        # Esta função continuará registrando uma nova compra, pois é para dados antigos
         await database.add_purchase(cliente.id, produto, valor, ctx.author.id, ctx.author.id)
         total_spent, _ = await database.get_user_spend_and_count(cliente.id)
         await self.update_user_roles_by_spend(cliente, total_spent)
-        await ctx.respond(f"Compra antiga de '{produto}' para {cliente.mention} adicionada! Cargos por gasto atualizados.", ephemeral=True)
+        await ctx.respond(f"Compra antiga de '{produto}' para {cliente.mention} adicionada! Cargos atualizados.", ephemeral=True)
 
     @commands.slash_command(name="fechar", description="Fecha e arquiva um carrinho inativo.")
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
@@ -95,19 +102,40 @@ class AdminCog(commands.Cog):
             await ctx.channel.edit(archived=True, locked=True)
         except Exception as e: print(f"Erro ao fechar o tópico: {e}")
 
+    # --- LISTENER RESTAURADO PARA TODOS OS BOTÕES ---
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         custom_id = interaction.data.get("custom_id", "")
-        if not custom_id.startswith("follow_up_"): return
-        if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
-            return await interaction.response.send_message("Você não tem permissão.", ephemeral=True)
-        await interaction.response.defer()
-        user_id = int(custom_id.split("_")[2])
-        cliente = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-        entregador = interaction.user
-        if cliente:
-            await log_dm(self.bot, entregador, content=f"Olá! Você iniciou o acompanhamento da entrega para **{cliente.display_name}**. Entre em contato com o cliente para auxiliá-lo.")
-        await (await interaction.original_response()).edit(content=f"Acompanhamento para {cliente.mention} iniciado por {entregador.mention}!", view=None)
+        
+        if custom_id.startswith("attend_order_"):
+            if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
+                return await interaction.response.send_message("Você não tem permissão.", ephemeral=True)
+            
+            await interaction.response.defer()
+            parts = custom_id.split("_")
+            thread_id, user_id = int(parts[2]), int(parts[3])
+            attendant = interaction.user
+            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            
+            log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
+            if log_channel: await log_channel.send(embed=discord.Embed(description=f"{attendant.mention} está cuidando do carrinho de {user.mention}.", color=0x32CD32))
+            
+            thread = self.bot.get_channel(thread_id)
+            if thread: await thread.send(f"Olá! Eu sou {attendant.mention} e vou te atender a partir de agora.")
+
+            await (await interaction.original_response()).edit(content=f"Carrinho assumido por {attendant.mention}!", view=None)
+
+        elif custom_id.startswith("follow_up_"):
+            if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
+                return await interaction.response.send_message("Você não tem permissão.", ephemeral=True)
+            
+            await interaction.response.defer()
+            user_id = int(custom_id.split("_")[2])
+            cliente = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            entregador = interaction.user
+            if cliente:
+                await log_dm(self.bot, entregador, content=f"Olá! Você iniciou o acompanhamento da entrega para **{cliente.display_name}**. Entre em contato com o cliente para auxiliá-lo.")
+            await (await interaction.original_response()).edit(content=f"Acompanhamento para {cliente.mention} iniciado por {entregador.mention}!", view=None)
 
 def setup(bot):
     bot.add_cog(AdminCog(bot))
