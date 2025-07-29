@@ -34,7 +34,7 @@ REVIEW_CHANNEL_ID = 1380180935302975620
 AWAITING_DELIVERY_CHANNEL_ID = 1399488972706812037
 FOLLOW_UP_CHANNEL_ID = 1385371013226827986
 CALCULATOR_CHANNEL_ID = 1398034780783644794
-GENERAL_LOG_CHANNEL_ID = 1394112959436820520 # Canal para logs de DM, etc.
+GENERAL_LOG_CHANNEL_ID = 1394112959436820520
 
 # --- CONFIGURAÇÕES GERAIS ---
 EMBED_COLOR = 0xFF69B4
@@ -52,7 +52,11 @@ ROBUX_PRICES = {
 
 # --- FUNÇÃO AUXILIAR DE PREÇO ---
 def calculate_robux_price(amount: int) -> float:
-    if not isinstance(amount, int): amount = int(amount)
+    if not isinstance(amount, int):
+        try:
+            amount = int(amount)
+        except (ValueError, TypeError):
+            return 0.0
     if amount in ROBUX_PRICES:
         return ROBUX_PRICES[amount]
     base_price_1000 = ROBUX_PRICES[1000]
