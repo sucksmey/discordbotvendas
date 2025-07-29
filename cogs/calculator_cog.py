@@ -6,15 +6,13 @@ import re
 
 import config
 
-# --- View com os botões de conversão ---
 class ConversionView(View):
     def __init__(self, value: float, original_author_id: int):
-        super().__init__(timeout=60.0)  # Os botões desaparecerão após 60 segundos
+        super().__init__(timeout=60.0)
         self.value = value
         self.original_author_id = original_author_id
         self.message = None
 
-    # Garante que apenas o autor original da mensagem possa clicar nos botões
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.original_author_id:
             await interaction.response.send_message("Você não pode interagir com os botões de outra pessoa.", ephemeral=True)
@@ -29,7 +27,6 @@ class ConversionView(View):
         embed = discord.Embed(title="🧮 Calculadora IsraBuy", color=config.EMBED_COLOR)
         embed.description = f"💰 **R$ {self.value:.2f}** equivalem a aproximadamente **{robux_amount} Robux**."
         
-        # Edita a mensagem original para mostrar apenas a resposta, removendo os botões
         await interaction.response.edit_message(embed=embed, view=None)
 
     @button(label="Converter para Reais", style=discord.ButtonStyle.secondary, emoji="💰")
@@ -39,16 +36,16 @@ class ConversionView(View):
         embed = discord.Embed(title="🧮 Calculadora IsraBuy", color=config.EMBED_COLOR)
         embed.description = f"💎 **{int(self.value)} Robux** custam **R$ {brl_amount:.2f}**."
 
-        # Edita a mensagem original para mostrar apenas a resposta, removendo os botões
         await interaction.response.edit_message(embed=embed, view=None)
 
     async def on_timeout(self):
         if self.message:
-            # Desabilita os botões na mensagem original quando o tempo esgota
             for item in self.children:
                 item.disabled = True
-            await self.message.edit(view=self)
-
+            try:
+                await self.message.edit(view=self)
+            except discord.NotFound:
+                pass # A mensagem pode ter sido deletada
 
 class CalculatorCog(commands.Cog):
     def __init__(self, bot):
@@ -82,13 +79,17 @@ class CalculatorCog(commands.Cog):
         value, currency = self.parse_input(message.content)
 
         if value is None:
-            help_embed = discord.Embed(
-                title="❌ Formato Inválido",
-                description="Por favor, digite um valor no formato correto.\n\n**Exemplos:**\n`1000 robux`\n`41 reais`\n`10.50`",
-                color=discord.Color.red()
-            )
+            help_embed = discord.Embed(title="❌ Formato Inválido", description="Use os formatos: `1000 robux`, `41 reais` ou `10.50`.", color=discord.Color.red())
             await message.reply(embed=help_embed, delete_after=15)
             return
+
+        # VALIDAÇÃO DE VALOR MÍNIMO
+        if (currency == 'BRL' and value < 4.50) or (currency == 'ROBUX' and value < 100):
+             return await message.reply(f"O valor mínimo para cálculo é de **100 Robux** (R$ 4,50).")
+        if currency == 'AMBIGUOUS' and value < 100:
+             brl_amount = config.calculate_robux_price(int(value))
+             if brl_amount < 4.50:
+                 return await message.reply("O valor mínimo para cálculo é de **100 Robux** ou **R$ 4,50**.")
 
         embed = discord.Embed(title="🧮 Calculadora IsraBuy", color=config.EMBED_COLOR)
 
@@ -104,16 +105,11 @@ class CalculatorCog(commands.Cog):
             await message.reply(embed=embed)
         
         elif currency == 'AMBIGUOUS':
-            # --- LÓGICA ATUALIZADA AQUI ---
-            # Em vez de mostrar as duas opções, agora pergunta ao usuário.
             view = ConversionView(value=value, original_author_id=message.author.id)
-            
             embed = discord.Embed(title="🤔 Qual moeda?", color=config.EMBED_COLOR)
             embed.description = f"O valor `{message.content}` que você digitou é em Reais ou Robux?\n\nEscolha uma opção abaixo para converter."
-            
             sent_message = await message.reply(embed=embed, view=view)
-            view.message = sent_message # Armazena a mensagem para poder editar no timeout
-
+            view.message = sent_message
 
 def setup(bot):
     bot.add_cog(CalculatorCog(bot))
