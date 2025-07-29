@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select
 import asyncio
+import os
 
 import config
 import database
@@ -28,7 +29,7 @@ class StoreCog(commands.Cog):
     @commands.has_any_role(*config.ATTENDANT_ROLE_IDS)
     async def start_store(self, ctx: discord.ApplicationContext):
         channel = ctx.channel 
-        embed = discord.Embed(title="🛍️ Loja de Itens da IsraBuy", description="Procurando por Gift Cards, Nitros ou outros produtos digitais? Clique no botão abaixo para ver todas as nossas categorias de itens com estoque!", color=config.EMBED_COLOR)
+        embed = discord.Embed(title="🛍️ Loja de Itens da IsraBuy", description="Clique no botão abaixo para ver todas as nossas categorias de itens!", color=config.EMBED_COLOR)
         await channel.send(embed=embed, view=self.StoreView(self))
         await ctx.respond("Painel da Loja criado com sucesso!", ephemeral=True)
 
@@ -84,17 +85,17 @@ class StoreCog(commands.Cog):
         thread = await interaction.channel.create_thread(name=f"🛍️ {product['name']} - {user.display_name}", type=discord.ChannelType.private_thread)
         await database.set_active_thread(user.id, thread.id)
         
-        await thread.add_user(user)
-        try:
-            leader = await interaction.guild.fetch_member(config.LEADER_ID)
-            if leader: await thread.add_user(leader)
-        except Exception as e: print(f"Não foi possível adicionar o líder ao tópico da loja: {e}")
+        users_to_add = {user, await interaction.guild.fetch_member(config.LEADER_ID)}
         for role_id in config.ATTENDANT_ROLE_IDS:
             role = interaction.guild.get_role(role_id)
-            if role:
-                for member in role.members:
-                    try: await thread.add_user(member)
-                    except Exception: pass
+            if role: users_to_add.update(role.members)
+        for u in users_to_add:
+            if u:
+                try: 
+                    await thread.add_user(u)
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    print(f"Não foi possível adicionar o usuário {u.id} ao tópico da loja: {e}")
 
         await interaction.edit_original_response(content=f"Seu carrinho foi criado aqui: {thread.mention}", view=None)
         log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
@@ -108,7 +109,7 @@ class StoreCog(commands.Cog):
             await thread.send(user.mention, embed=embed)
             
             msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author == user and m.channel == thread and m.attachments, timeout=172800.0)
-            customer_role = interaction.guild.get_role(config.EXISTING_CUSTOMER_ROLE_ID)
+            customer_role = interaction.guild.get_role(config.INITIAL_BUYER_ROLE_ID)
             if customer_role: await user.add_roles(customer_role, reason="Enviou comprovante de item")
             
             await thread.send("✅ Comprovante recebido!")
