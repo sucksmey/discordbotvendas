@@ -6,7 +6,6 @@ import config
 pool = None
 
 async def init_db():
-    """Inicializa a pool de conexões e cria as tabelas se não existirem."""
     global pool
     if not config.DATABASE_URL:
         raise Exception("DATABASE_URL não foi encontrada nas variáveis de ambiente.")
@@ -18,14 +17,10 @@ async def init_db():
                 user_id BIGINT PRIMARY KEY,
                 purchase_count INTEGER DEFAULT 0,
                 is_vip BOOLEAN DEFAULT FALSE,
-                vip_purchases_this_month INTEGER DEFAULT 0,
                 active_thread_id BIGINT DEFAULT NULL
             );
         """)
-        # Adiciona a nova coluna se ela não existir, sem apagar dados
-        await connection.execute("""
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS active_thread_id BIGINT DEFAULT NULL;
-        """)
+        await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_thread_id BIGINT DEFAULT NULL;")
         
         await connection.execute("""
             CREATE TABLE IF NOT EXISTS purchases (
@@ -62,16 +57,36 @@ async def set_active_thread(user_id: int, thread_id: int | None):
         await conn.execute("INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING;", user_id)
         await conn.execute("UPDATE users SET active_thread_id = $1 WHERE user_id = $2;", thread_id, user_id)
 
-async def add_purchase(user_id: int, product_name: str, price: float, attendant_id: int, deliverer_id: int):
-    """Adiciona uma compra ao DB, incrementa o contador e retorna o ID da nova compra e a contagem total."""
+async def add_purchase(user_id: int, product_name: str, price: float, attendant_id: int, deliverer_id: int | None):
+    """Adiciona uma compra ao DB e incrementa o contador de compras."""
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING;", user_id)
         new_purchase = await conn.fetchrow(
             "INSERT INTO purchases (user_id, product_name, price_brl, purchase_date, attendant_id, deliverer_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING purchase_id;",
             user_id, product_name, price, datetime.datetime.now(datetime.timezone.utc), attendant_id, deliverer_id
         )
-        user_data = await conn.fetchrow("UPDATE users SET purchase_count = purchase_count + 1 WHERE user_id = $1 RETURNING purchase_count;", user_id)
-        return new_purchase['purchase_id'], user_data['purchase_count']
+        await conn.execute("UPDATE users SET purchase_count = purchase_count + 1 WHERE user_id = $1;", user_id)
+        return new_purchase['purchase_id']
+
+async def get_user_spend_and_count(user_id: int):
+    """Retorna o total gasto e a contagem de compras de um usuário."""
+    async with pool.acquire() as conn:
+        await conn.execute("INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING;", user_id)
+        data = await conn.fetchrow("""
+            SELECT SUM(p.price_brl) as total_spent, u.purchase_count
+            FROM users u
+            LEFT JOIN purchases p ON u.user_id = p.user_id
+            WHERE u.user_id = $1
+            GROUP BY u.user_id, u.purchase_count;
+        """, user_id)
+        if not data:
+             # Se o usuário existe mas não tem compras, busca a contagem de compras dele
+            count_data = await conn.fetchrow("SELECT purchase_count FROM users WHERE user_id = $1", user_id)
+            return 0.0, count_data['purchase_count'] if count_data else 0
+
+        total_spent = data['total_spent'] if data['total_spent'] is not None else 0
+        purchase_count = data['purchase_count'] if data['purchase_count'] is not None else 0
+        return float(total_spent), purchase_count
 
 async def get_purchase_history(user_id: int):
     """Retorna o histórico de compras de um usuário."""
@@ -93,12 +108,6 @@ async def set_vip_status(user_id: int, status: bool):
     """Define o status VIP de um usuário."""
     async with pool.acquire() as conn:
         await conn.execute("INSERT INTO users (user_id, is_vip) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET is_vip = $2;", user_id, status)
-
-async def get_user_spend(user_id: int):
-    """Retorna o total gasto por um usuário."""
-    async with pool.acquire() as conn:
-        total = await conn.fetchval("SELECT SUM(price_brl) FROM purchases WHERE user_id = $1;", user_id)
-        return total if total is not None else 0
 
 async def add_product(name: str, price: float, stock: int, category: str):
     """Adiciona um novo produto ao banco de dados."""
