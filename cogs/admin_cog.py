@@ -37,7 +37,7 @@ class AdminCog(commands.Cog):
         
         pending_purchase = await database.get_pending_purchase(cliente.id)
         if not pending_purchase:
-            return await ctx.respond(f"❌ Não encontrei nenhuma compra pendente para {cliente.mention} para finalizar.", ephemeral=True)
+            return await ctx.respond(f"❌ Não encontrei compra pendente para {cliente.mention}.", ephemeral=True)
 
         purchase_id = pending_purchase['purchase_id']
         produto = pending_purchase['product_name']
@@ -47,7 +47,7 @@ class AdminCog(commands.Cog):
         await database.set_active_thread(cliente.id, None)
 
         review_view = View(timeout=None); review_view.add_item(Button(label="⭐ Avaliar esta Compra", style=discord.ButtonStyle.success, custom_id=f"review_purchase_{purchase_id}"))
-        await log_dm(self.bot, cliente, content=f"Sua entrega de **{produto}** foi concluída! Agradecemos a preferência. Por favor, deixe sua avaliação.", view=review_view)
+        await log_dm(self.bot, cliente, content=f"Sua entrega de **{produto}** foi concluída! Agradecemos a preferência.", view=review_view)
         if isinstance(ctx.channel, discord.Thread):
             await ctx.channel.send("A entrega foi finalizada! Por favor, deixe sua avaliação clicando no botão abaixo!", view=review_view)
 
@@ -61,14 +61,9 @@ class AdminCog(commands.Cog):
             log_embed.set_thumbnail(url=cliente.display_avatar.url)
             log_embed.add_field(name="Produto Comprado", value=produto, inline=False)
             log_embed.add_field(name="Valor Pago", value=f"R$ {valor:.2f}", inline=False)
-            compra_str = "🎉 **Esta é a primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra** do cliente."
-            log_embed.add_field(name="Histórico do Cliente", value=compra_str, inline=False)
-            log_embed.add_field(name="Total Gasto na Loja", value=f"R$ {total_spent:.2f}", inline=False)
-            log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True)
-            log_embed.add_field(name="Entregue por", value=entregador.mention, inline=True)
-            vip_role = ctx.guild.get_role(config.VIP_ROLE_ID)
-            if vip_role and vip_role in cliente.roles:
-                log_embed.add_field(name="Status", value="⭐ **Cliente VIP**", inline=False)
+            compra_str = "🎉 **Primeira compra!**" if purchase_count == 1 else f"Esta é a **{purchase_count}ª compra**."
+            log_embed.add_field(name="Histórico", value=compra_str).add_field(name="Total Gasto", value=f"R$ {total_spent:.2f}")
+            log_embed.add_field(name="Atendido por", value=atendente.mention, inline=True).add_field(name="Entregue por", value=entregador.mention, inline=True)
             await delivery_log_channel.send(embed=log_embed)
         
         follow_up_channel = self.bot.get_channel(config.FOLLOW_UP_CHANNEL_ID)
@@ -107,31 +102,39 @@ class AdminCog(commands.Cog):
             await ctx.channel.edit(archived=True, locked=True)
         except Exception as e: print(f"Erro ao fechar o tópico: {e}")
 
+    # --- LISTENER CORRIGIDO E REFORÇADO ---
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
         custom_id = interaction.data.get("custom_id", "")
         
         if custom_id.startswith("attend_order_"):
             if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
-                return await interaction.response.send_message("Você não tem permissão.", ephemeral=True)
+                return await interaction.response.send_message("Você não tem permissão para atender carrinhos.", ephemeral=True)
             
             await interaction.response.defer()
+            
             parts = custom_id.split("_")
             thread_id, user_id = int(parts[2]), int(parts[3])
             attendant = interaction.user
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             
-            log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
-            if log_channel: await log_channel.send(embed=discord.Embed(description=f"{attendant.mention} está cuidando do carrinho de {user.mention}.", color=0x32CD32))
-            
+            # Envia a mensagem no canal do cliente
             thread = self.bot.get_channel(thread_id)
-            if thread: await thread.send(f"Olá! Eu sou {attendant.mention} e vou te atender a partir de agora.")
+            if thread:
+                await thread.send(f"Olá! Eu sou {attendant.mention} e vou te atender a partir de agora.")
 
-            await (await interaction.original_response()).edit(content=f"Carrinho assumido por {attendant.mention}!", view=None)
+            # Edita a mensagem original no canal da equipe
+            try:
+                original_message = await interaction.original_response()
+                await original_message.edit(content=f"**Carrinho assumido por {attendant.mention}!**", view=None)
+            except discord.Forbidden:
+                print(f"!!! ERRO: O bot não tem permissão para editar a mensagem no canal {interaction.channel.name}.")
+            except Exception as e:
+                print(f"!!! ERRO: Falha desconhecida ao editar a mensagem original: {e}")
 
         elif custom_id.startswith("follow_up_"):
             if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
-                return await interaction.response.send_message("Você não tem permissão.", ephemeral=True)
+                return await interaction.response.send_message("Você não tem permissão para iniciar acompanhamentos.", ephemeral=True)
             
             await interaction.response.defer()
             user_id = int(custom_id.split("_")[2])
@@ -139,7 +142,11 @@ class AdminCog(commands.Cog):
             entregador = interaction.user
             if cliente:
                 await log_dm(self.bot, entregador, content=f"Olá! Você iniciou o acompanhamento da entrega para **{cliente.display_name}**. Entre em contato com o cliente para auxiliá-lo.")
-            await (await interaction.original_response()).edit(content=f"Acompanhamento para {cliente.mention} iniciado por {entregador.mention}!", view=None)
+            
+            try:
+                await (await interaction.original_response()).edit(content=f"Acompanhamento para {cliente.mention} iniciado por {entregador.mention}!", view=None)
+            except Exception as e:
+                print(f"Falha ao editar mensagem de acompanhamento: {e}")
 
 def setup(bot):
     bot.add_cog(AdminCog(bot))
