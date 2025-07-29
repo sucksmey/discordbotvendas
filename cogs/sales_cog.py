@@ -1,10 +1,9 @@
 # cogs/sales_cog.py
 import discord
 from discord.ext import commands
-from discord.ui import View, Button
+from discord.ui import View, Button, Modal, InputText
 import asyncio
 import re
-import os
 
 import config
 import database
@@ -17,13 +16,44 @@ def parse_robux_amount(text: str) -> int:
     numeric_part = re.sub(r'[^\d]', '', text)
     return int(numeric_part) if numeric_part else 0
 
+class RobuxOrderModal(Modal):
+    def __init__(self, cog, purchase_type):
+        super().__init__(title="Iniciar Compra de Robux")
+        self.cog = cog
+        self.purchase_type = purchase_type
+        self.add_item(InputText(label="Seu nickname no Roblox", placeholder="Ex: construtordomundo123", required=True))
+        self.add_item(InputText(label="Quantidade de Robux", placeholder="Ex: 1000, 1.5k, 2000", required=True))
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        nickname = self.children[0].value
+        amount_str = self.children[1].value
+        await self.cog.process_robux_order(interaction, nickname, amount_str, self.purchase_type)
+
 class SalesCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def update_spend_roles(self, member: discord.Member, total_spent: float):
+        if not member: return
+        spend_role_ids = list(config.SPEND_ROLES_TIERS.values())
+        highest_role_to_add = None
+        for spend_threshold, role_id in sorted(config.SPEND_ROLES_TIERS.items(), reverse=True):
+            if total_spent >= spend_threshold:
+                highest_role_to_add = role_id
+                break 
+        if highest_role_to_add:
+            roles_to_remove = [r for r in member.roles if r.id in spend_role_ids and r.id != highest_role_to_add]
+            if roles_to_remove:
+                await member.remove_roles(*roles_to_remove, reason="Atualização de cargo por gasto")
+            if not any(r.id == highest_role_to_add for r in member.roles):
+                role_to_add = member.guild.get_role(highest_role_to_add)
+                if role_to_add:
+                    await member.add_roles(role_to_add, reason=f"Atingiu R$ {total_spent:.2f} em gastos")
+
     class PrePurchaseConfirmationView(View):
         def __init__(self, cog, interaction, purchase_type):
-            super().__init__(timeout=300)
+            super().__init__(timeout=180)
             self.cog = cog
             self.interaction = interaction
             self.purchase_type = purchase_type
@@ -36,14 +66,9 @@ class SalesCog(commands.Cog):
 
         @discord.ui.button(label="Confirmar Abertura do Carrinho", style=discord.ButtonStyle.success, emoji="✅")
         async def confirm_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
-            await interaction.response.defer()
             for item in self.children: item.disabled = True
             await self.interaction.edit_original_response(view=self)
-
-            if self.purchase_type == 'robux':
-                await self.cog.create_robux_thread(interaction)
-            elif self.purchase_type == 'gamepass':
-                await self.cog.create_gamepass_thread(interaction)
+            await interaction.response.send_modal(RobuxOrderModal(self.cog, self.purchase_type))
         
         @discord.ui.button(label="Cancelar Compra", style=discord.ButtonStyle.danger, emoji="❌")
         async def cancel_callback(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -107,16 +132,22 @@ class SalesCog(commands.Cog):
         view = self.PrePurchaseConfirmationView(self, interaction, purchase_type)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    async def create_robux_thread(self, interaction: discord.Interaction):
+    async def process_robux_order(self, interaction: discord.Interaction, nickname: str, amount_str: str, purchase_type: str):
         user = interaction.user
-        thread = await interaction.channel.create_thread(name=f"🛒 Robux - {user.display_name}", type=discord.ChannelType.private_thread)
+        try:
+            amount = parse_robux_amount(amount_str)
+            if not (100 <= amount <= 10000):
+                await interaction.followup.send("❌ Quantidade de Robux inválida (mín: 100, máx: 10.000).", ephemeral=True)
+                return
+        except (ValueError, TypeError):
+            await interaction.followup.send("❌ Quantidade de Robux inválida. Por favor, use apenas números.", ephemeral=True)
+            return
+
+        thread = await interaction.channel.create_thread(name=f"🛒 {amount} Robux - {nickname}", type=discord.ChannelType.private_thread)
         await database.set_active_thread(user.id, thread.id)
         
-        await thread.add_user(user)
-        try:
-            leader = await interaction.guild.fetch_member(config.LEADER_ID)
-            if leader: await thread.add_user(leader)
-        except Exception as e: print(f"Não foi possível adicionar o líder ao tópico: {e}")
+        for u in [user] + [await interaction.guild.fetch_member(config.LEADER_ID)]:
+            if u: await thread.add_user(u)
         for role_id in config.ATTENDANT_ROLE_IDS:
             role = interaction.guild.get_role(role_id)
             if role:
@@ -126,145 +157,53 @@ class SalesCog(commands.Cog):
         
         view = View(); view.add_item(Button(label="Ver seu Carrinho", style=discord.ButtonStyle.link, url=thread.jump_url))
         await interaction.followup.send(f"✅ Carrinho criado! Continue sua compra aqui: {thread.mention}", view=view, ephemeral=True)
-        await log_dm(self.bot, user, content=f"Seu carrinho na IsraBuy foi aberto. Clique no botão para acessá-lo.", view=view)
+        await log_dm(self.bot, user, content=f"Seu carrinho na IsraBuy foi aberto.", view=view)
 
-        admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
-        admin_view = View(timeout=None)
-        admin_view.add_item(Button(label="Atender Pedido", style=discord.ButtonStyle.green, custom_id=f"attend_robux_{thread.id}_{user.id}"))
-        if admin_channel: await admin_channel.send(f"🛒 Novo carrinho de **Robux** para {user.mention} aguarda um atendente.", view=admin_view)
-        
-        robux_prices_str = "\n".join([f"**{a} Robux:** R$ {p:.2f}" for a, p in config.ROBUX_PRICES.items()])
-        welcome_embed = discord.Embed(title="Tabela de Preços (Robux)", description=robux_prices_str, color=config.EMBED_COLOR)
-        await thread.send(embed=welcome_embed)
-        await thread.send(f"Olá {user.mention}, bem-vindo(a)! Para começar, por favor, me informe seu **nickname no Roblox**.")
+        price = config.calculate_robux_price(amount) if purchase_type == 'robux' else config.calculate_gamepass_price(amount)
 
-        def chk(m): return m.author == user and m.channel == thread
+        embed = discord.Embed(title="✅ Pedido Iniciado", description="Para continuar, realize o pagamento e envie o comprovante de pagamento aqui no chat.", color=config.EMBED_COLOR)
+        embed.add_field(name="Nickname Roblox", value=f"`{nickname}`").add_field(name="Quantidade", value=f"`{amount}`").add_field(name="Valor a Pagar", value=f"**R$ {price:.2f}**")
+        embed.add_field(name="Chave PIX", value=config.PIX_KEY, inline=False)
+        await thread.send(user.mention, embed=embed)
+
         try:
-            nick_msg = await self.bot.wait_for('message', check=chk, timeout=172800.0)
-            nick = nick_msg.content
-            await thread.send(f"Ok, **{nick}**! Qual a **quantidade de Robux** você deseja?")
-            amt_msg = await self.bot.wait_for('message', check=chk, timeout=172800.0)
-            amt = parse_robux_amount(amt_msg.content)
-            
-            if not (100 <= amt <= 10000):
-                await database.set_active_thread(user.id, None)
-                return await thread.send("Quantidade inválida. Este carrinho foi cancelado.")
-
-            price = config.calculate_robux_price(amt)
-            disc = 0.0
-            ncr = interaction.guild.get_role(config.NEW_CUSTOMER_ROLE_ID)
-            if ncr and ncr in user.roles:
-                disc = price * (config.NEW_CUSTOMER_DISCOUNT_PERCENT / 100)
-                price -= disc
-            
-            pe = discord.Embed(title="✅ Pedido Resumido (Robux)", color=config.EMBED_COLOR)
-            desc = f"**Nickname:** `{nick}`\n**Quantidade:** `{amt}` Robux\n"
-            if disc > 0: desc += f"**Subtotal:** `R$ {(price + disc):.2f}`\n**Desconto:** `-R$ {disc:.2f}`\n**Valor a pagar:** `R$ {price:.2f}`\n\n"
-            else: desc += f"**Valor a pagar:** `R$ {price:.2f}`\n\n"
-            pe.description = desc + "Por favor, realize o pagamento via PIX e envie o comprovante."
-            pe.add_field(name="Chave PIX", value=config.PIX_KEY)
-            
-            if os.path.exists("assets/qrcode.png"):
-                qrf = discord.File("assets/qrcode.png", filename="qrcode.png")
-                pe.set_image(url="attachment://qrcode.png")
-                await thread.send(file=qrf, embed=pe)
-            else: await thread.send(embed=pe)
-            
             msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author.id == user.id and m.channel.id == thread.id and m.attachments, timeout=172800.0)
-            customer_role = interaction.guild.get_role(config.EXISTING_CUSTOMER_ROLE_ID)
-            if customer_role: await user.add_roles(customer_role, reason="Enviou comprovante de pagamento")
+            
+            initial_role = interaction.guild.get_role(config.INITIAL_BUYER_ROLE_ID)
+            if initial_role: await user.add_roles(initial_role)
 
-            await thread.send("✅ Comprovante recebido! Um atendente já está com seu pedido e irá te guiar.")
-            await thread.send("A entrega é via Gamepass. **Um atendente irá te auxiliar e informar o valor exato a ser colocado na Gamepass.** Por favor, aguarde.")
+            await thread.edit(name=f"🛒 {amount} R$ - {nickname} - Aguardando Entrega")
+
+            approved_embed = discord.Embed(title="✅ Pagamento Aprovado!", color=0x28a745, description="Seu pagamento foi aprovado com sucesso! Confira abaixo as informações da sua compra.")
+            approved_embed.add_field(name="Nome no Roblox", value=nickname).add_field(name="Valor em Robux", value=str(amount)).add_field(name="Valor em Reais", value=f"R$ {price:.2f}")
+            approved_embed.add_field(name="Entrega", value="Sua compra será entregue em até 72 Horas Úteis por um de nossos entregadores.")
+            await thread.send(embed=approved_embed)
+            
+            delivery_channel = self.bot.get_channel(config.AWAITING_DELIVERY_CHANNEL_ID)
+            if delivery_channel: await delivery_channel.send(f"⏳ O usuário {user.mention} (`{nickname}`) está aguardando a entrega de **{amount} Robux**.")
+            
+            attendant_bot_id = self.bot.user.id
+            purchase_id = await database.add_purchase(user.id, f"{amount} Robux", price, attendant_bot_id, None)
+
+            total_spent, _ = await database.get_user_spend_and_count(user.id)
+            await self.update_spend_roles(user, total_spent)
+            
+            review_view = View(timeout=None); review_view.add_item(Button(label="⭐ Avaliar Compra", style=discord.ButtonStyle.success, custom_id=f"review_purchase_{purchase_id}"))
+            await log_dm(self.bot, user, content="Sua compra foi aprovada! Quando receber, por favor, nos avalie.", view=review_view)
+            await thread.send("Após a entrega ser concluída, por favor, deixe sua avaliação clicando no botão abaixo!", view=review_view)
+
+            follow_up_channel = self.bot.get_channel(config.FOLLOW_UP_CHANNEL_ID)
+            if follow_up_channel:
+                follow_up_view = View(timeout=None)
+                follow_up_view.add_item(Button(label="Iniciar Acompanhamento", style=discord.ButtonStyle.primary, custom_id=f"follow_up_{user.id}"))
+                await follow_up_channel.send(f"Compra de {user.mention} aprovada. Um entregador precisa iniciar o acompanhamento.", view=follow_up_view)
+
+            await thread.send(f"Obrigado! A entrega é via Gamepass. Para continuar, por favor, envie o link do seu jogo/passe. Um atendente irá te guiar com os próximos passos.")
 
         except asyncio.TimeoutError:
             await thread.send("Seu pedido expirou por inatividade."); await asyncio.sleep(5)
             await database.set_active_thread(user.id, None)
             await thread.edit(archived=True, locked=True)
-
-    async def create_gamepass_thread(self, interaction: discord.Interaction):
-        user = interaction.user
-        thread = await interaction.channel.create_thread(name=f"🎟️ Gamepass - {user.display_name}", type=discord.ChannelType.private_thread)
-        await database.set_active_thread(user.id, thread.id)
-        
-        await thread.add_user(user)
-        try:
-            leader = await interaction.guild.fetch_member(config.LEADER_ID)
-            if leader: await thread.add_user(leader)
-        except Exception as e: print(f"Não foi possível adicionar o líder ao tópico: {e}")
-        for role_id in config.ATTENDANT_ROLE_IDS:
-            role = interaction.guild.get_role(role_id)
-            if role:
-                for member in role.members:
-                    try: await thread.add_user(member)
-                    except Exception: pass
-
-        view = View(); view.add_item(Button(label="Ver seu Carrinho", style=discord.ButtonStyle.link, url=thread.jump_url))
-        await interaction.followup.send(f"✅ Carrinho criado! Continue sua compra aqui: {thread.mention}", view=view, ephemeral=True)
-        await log_dm(self.bot, user, content=f"Seu carrinho na IsraBuy foi aberto. Clique no botão para acessá-lo.", view=view)
-
-        admin_channel = self.bot.get_channel(config.ADMIN_NOTIF_CHANNEL_ID)
-        admin_view = View(timeout=None)
-        admin_view.add_item(Button(label="Atender Pedido", style=discord.ButtonStyle.primary, custom_id=f"attend_gamepass_{thread.id}_{user.id}"))
-        if admin_channel: await admin_channel.send(f"🎟️ Novo carrinho de **Gamepass** para {user.mention} aguarda um atendente.", view=admin_view)
-            
-        gamepass_prices_str = "\n".join([f"**{a} Robux:** R$ {p:.2f}" for a, p in config.GAMEPASS_PRICES.items()])
-        welcome_embed = discord.Embed(title="Tabela de Preços (Gamepass)", description=gamepass_prices_str, color=config.EMBED_COLOR)
-        await thread.send(embed=welcome_embed)
-        await thread.send(f"Olá {user.mention}, bem-vindo(a)! Qual a **quantidade de Robux** que você deseja?")
-        
-        def chk(m): return m.author == user and m.channel == thread
-        try:
-            amt_msg = await self.bot.wait_for('message', check=chk, timeout=172800.0)
-            amt = parse_robux_amount(amt_msg.content)
-            if not (100 <= amt <= 10000):
-                await database.set_active_thread(user.id, None)
-                return await thread.send("Quantidade inválida. Carrinho cancelado.")
-            price = config.calculate_gamepass_price(amt)
-            await thread.send("Ok! Qual o seu **nickname no Roblox**?")
-            nick_msg = await self.bot.wait_for('message', check=chk, timeout=172800.0)
-            nick = nick_msg.content
-            
-            pe = discord.Embed(title="✅ Pedido Resumido (Gamepass)", description=f"**Nickname:** `{nick}`\n**Quantidade:** `{amt}` Robux\n**Valor a pagar:** `R$ {price:.2f}`\n\nPor favor, realize o pagamento e envie o comprovante.", color=config.EMBED_COLOR)
-            pe.add_field(name="Chave PIX", value=config.PIX_KEY)
-            if os.path.exists("assets/qrcode.png"):
-                qrf = discord.File("assets/qrcode.png", "qrcode.png")
-                pe.set_image(url="attachment://qrcode.png")
-                await thread.send(file=qrf, embed=pe)
-            else: await thread.send(embed=pe)
-
-            msg_receipt = await self.bot.wait_for('message', check=lambda m: m.author.id == user.id and m.channel.id == thread.id and m.attachments, timeout=172800.0)
-            customer_role = interaction.guild.get_role(config.EXISTING_CUSTOMER_ROLE_ID)
-            if customer_role: await user.add_roles(customer_role, reason="Enviou comprovante de pagamento")
-            
-            await thread.send("✅ Comprovante recebido! Um atendente já está com seu pedido.")
-            await thread.send("Por favor, envie o **link do seu jogo** no Roblox e aguarde as instruções do atendente.")
-        except asyncio.TimeoutError:
-            await thread.send("Seu pedido expirou por inatividade."); await asyncio.sleep(5)
-            await database.set_active_thread(user.id, None)
-            await thread.edit(archived=True, locked=True)
-
-    @commands.Cog.listener()
-    async def on_interaction(self, interaction: discord.Interaction):
-        custom_id = interaction.data.get("custom_id", "")
-        if custom_id.startswith("attend_robux_") or custom_id.startswith("attend_gamepass_"):
-            if not any(r.id in config.ATTENDANT_ROLE_IDS for r in interaction.user.roles):
-                return await interaction.response.send_message("Você não tem permissão para atender este pedido.", ephemeral=True)
-            
-            await interaction.response.defer()
-            parts = custom_id.split("_")
-            thread_id, user_id = int(parts[2]), int(parts[3])
-            attendant, user = interaction.user, self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-            
-            await log_dm(self.bot, attendant, content="Você assumiu um novo ticket! Use o site abaixo para calcular a taxa da Gamepass (marcando 'Robux After Tax'):\nhttps://rbxtax.com/tax.html")
-            
-            log_channel = self.bot.get_channel(config.ATTENDANCE_LOG_CHANNEL_ID)
-            if log_channel: await log_channel.send(embed=discord.Embed(description=f"{attendant.mention} está cuidando do carrinho de {user.mention}.", color=0x32CD32))
-            
-            thread = self.bot.get_channel(thread_id)
-            if thread: await thread.send(f"Olá! Eu sou {attendant.mention} e vou te atender a partir de agora.")
-
-            await (await interaction.original_response()).edit(content=f"Carrinho assumido por {attendant.mention}!", view=None)
 
 def setup(bot):
     bot.add_cog(SalesCog(bot))
