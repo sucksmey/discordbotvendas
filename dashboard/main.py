@@ -1,28 +1,34 @@
 # dashboard/main.py
-from flask import Flask, render_template
+from quart import Quart, render_template
 import asyncpg
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-app = Flask(__name__)
+# Trocamos Flask por Quart
+app = Quart(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+@app.before_serving
+async def create_pool():
+    """Cria a pool de conexões com o banco de dados antes do servidor iniciar."""
+    if DATABASE_URL:
+        app.pool = await asyncpg.create_pool(dsn=DATABASE_URL, min_size=1, max_size=5)
+        print("Pool de conexões com o banco de dados criada.")
+    else:
+        print("ERRO: DATABASE_URL não encontrada.")
 
 @app.route('/')
 async def show_dashboard():
-    pool = None
-    # Dados padrão em caso de erro, para a página não quebrar
-    dashboard_data = { "total_sales": "Erro", "total_revenue": "Erro", "deliverer_counts": [] }
-    
+    dashboard_data = { "total_sales": 0, "total_revenue": "0.00", "deliverer_counts": [] }
+    if not hasattr(app, 'pool') or app.pool is None:
+        print("Dashboard acessado, mas a pool de conexões com o DB não existe.")
+        # A função render_template em Quart é assíncrona
+        return await render_template('dashboard.html', data=dashboard_data)
+
     try:
-        if not DATABASE_URL:
-            raise Exception("DATABASE_URL não foi encontrada nas variáveis de ambiente.")
-        
-        # Cria uma nova conexão com o banco de dados a cada visita
-        pool = await asyncpg.create_pool(dsn=DATABASE_URL, min_size=1, max_size=5)
-        
-        async with pool.acquire() as connection:
+        async with app.pool.acquire() as connection:
             total_sales = await connection.fetchval("SELECT COUNT(*) FROM purchases;")
             total_revenue_cents = await connection.fetchval("SELECT SUM(price_brl) FROM purchases;")
             total_revenue = float(total_revenue_cents / 100) if total_revenue_cents else 0.0
@@ -41,14 +47,11 @@ async def show_dashboard():
             }
     except Exception as e:
         print(f"ERRO NO DASHBOARD: {e}")
-    finally:
-        # Garante que a conexão com o banco de dados seja sempre fechada
-        if pool:
-            await pool.close()
+        dashboard_data = { "total_sales": "Erro", "total_revenue": "Erro", "deliverer_counts": [] }
 
-    return render_template('dashboard.html', data=dashboard_data)
+    # A função render_template em Quart é assíncrona, então usamos 'await'
+    return await render_template('dashboard.html', data=dashboard_data)
 
-# Esta parte é usada pelo Railway para iniciar o servidor
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+    # O Gunicorn vai cuidar de rodar a aplicação no Railway
+    pass
