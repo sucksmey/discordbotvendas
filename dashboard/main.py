@@ -6,13 +6,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Trocamos Flask por Quart
 app = Quart(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 @app.before_serving
 async def create_pool():
-    """Cria a pool de conexões com o banco de dados antes do servidor iniciar."""
     if DATABASE_URL:
         app.pool = await asyncpg.create_pool(dsn=DATABASE_URL, min_size=1, max_size=5)
         print("Pool de conexões com o banco de dados criada.")
@@ -21,10 +19,8 @@ async def create_pool():
 
 @app.route('/')
 async def show_dashboard():
-    dashboard_data = { "total_sales": 0, "total_revenue": "0.00", "deliverer_counts": [] }
+    dashboard_data = { "total_sales": "Erro", "total_revenue": "Erro", "deliverer_counts": [] }
     if not hasattr(app, 'pool') or app.pool is None:
-        print("Dashboard acessado, mas a pool de conexões com o DB não existe.")
-        # A função render_template em Quart é assíncrona
         return await render_template('dashboard.html', data=dashboard_data)
 
     try:
@@ -32,7 +28,6 @@ async def show_dashboard():
             total_sales = await connection.fetchval("SELECT COUNT(*) FROM purchases;")
             total_revenue_cents = await connection.fetchval("SELECT SUM(price_brl) FROM purchases;")
             total_revenue = float(total_revenue_cents / 100) if total_revenue_cents else 0.0
-            
             deliverer_counts_records = await connection.fetch("""
                 SELECT deliverer_id, COUNT(*) as count 
                 FROM purchases 
@@ -47,11 +42,5 @@ async def show_dashboard():
             }
     except Exception as e:
         print(f"ERRO NO DASHBOARD: {e}")
-        dashboard_data = { "total_sales": "Erro", "total_revenue": "Erro", "deliverer_counts": [] }
 
-    # A função render_template em Quart é assíncrona, então usamos 'await'
     return await render_template('dashboard.html', data=dashboard_data)
-
-if __name__ == '__main__':
-    # O Gunicorn vai cuidar de rodar a aplicação no Railway
-    pass
